@@ -1056,8 +1056,7 @@ self_test :: proc() {
 			base_x := nodes[i].curve_x + (nodes[i + 1].curve_x - nodes[i].curve_x) * fraction
 			base_y := nodes[i].curve_y + (nodes[i + 1].curve_y - nodes[i].curve_y) * fraction
 			base_z := nodes[i].curve_z + (nodes[i + 1].curve_z - nodes[i].curve_z) * fraction
-			base_heading :=
-				nodes[i].heading + (nodes[i + 1].heading - nodes[i].heading) * fraction
+			base_heading := nodes[i].heading + (nodes[i + 1].heading - nodes[i].heading) * fraction
 			uncropped_center := road_point(nodes, i, 0, base_x, base_y, base_z, base_heading)
 			playhead := f32(i) + fraction
 			sample_position := road_near_sample_position(
