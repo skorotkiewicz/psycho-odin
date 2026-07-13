@@ -7,6 +7,7 @@ odin             := "./odin-dev/odin"
 odin_release_api := "https://api.github.com/repos/odin-lang/Odin/releases/latest"
 binary           := "psycho"
 cache            := ".psycho_cache"
+source           := "./src"
 
 [private]
 default:
@@ -122,23 +123,23 @@ clean:
 
 # Normal optimized build.
 build: setup clean
-    {{odin}} build . -out:{{binary}} -o:speed
+    {{odin}} build "{{source}}" -out:{{binary}} -o:speed
 
 
 # Debug build with symbols and no optimization.
 build-debug: setup clean
-    {{odin}} build . -out:{{binary}} -debug -o:none
+    {{odin}} build "{{source}}" -out:{{binary}} -debug -o:none
 
 
 # Optimize for executable size.
 build-size: setup clean
-    {{odin}} build . -out:{{binary}} -o:size
+    {{odin}} build "{{source}}" -out:{{binary}} -o:size
 
 
 # Aggressive native-machine build.
 # Fast, but less portable and more aggressive than normal release builds.
 build-native: setup clean
-    {{odin}} build . \
+    {{odin}} build "{{source}}" \
         -out:{{binary}} \
         -o:aggressive \
         -microarch:native
@@ -146,7 +147,7 @@ build-native: setup clean
 
 # Build and print compiler timing information.
 build-timings: setup clean
-    {{odin}} build . \
+    {{odin}} build "{{source}}" \
         -out:{{binary}} \
         -o:speed \
         -show-more-timings
@@ -154,12 +155,12 @@ build-timings: setup clean
 
 # Fast semantic/type check without producing an executable.
 check: setup
-    {{odin}} check .
+    {{odin}} check "{{source}}"
 
 
 # Additional compiler vetting.
 vet: setup
-    {{odin}} check . \
+    {{odin}} check "{{source}}" \
         -vet \
         -vet-tabs \
         -vet-style \
@@ -168,7 +169,7 @@ vet: setup
 
 # Strict CI-style linting.
 lint: setup
-    {{odin}} check . \
+    {{odin}} check "{{source}}" \
         -vet \
         -vet-tabs \
         -vet-style \
@@ -178,24 +179,22 @@ lint: setup
 
 # Format project Odin files.
 # Requires `odinfmt` from OLS to be available in PATH.
-# Excludes the vendored Odin compiler and generated cache.
+# Formats only the project package.
 fmt:
     @command -v odinfmt >/dev/null || { \
         echo "error: odinfmt is not installed or not in PATH"; \
         exit 1; \
     }
-    find . \
+    find "{{source}}" \
         -type f \
         -name '*.odin' \
-        ! -path './odin-dev/*' \
-        ! -path './.psycho_cache/*' \
         -exec odinfmt -w {} \;
 
 
 # Run the project in debug mode.
 # Example: just run --level test.json
 run *args: setup
-    {{odin}} run . -debug -- {{args}}
+    {{odin}} run "{{source}}" -debug -- {{args}}
 
 
 # Run an already-built executable.
@@ -205,7 +204,7 @@ exec *args: build
 
 # Run Odin tests.
 test: setup
-    {{odin}} test . \
+    {{odin}} test "{{source}}" \
         -vet \
         -vet-tabs \
         -vet-style
@@ -213,7 +212,7 @@ test: setup
 
 # Run tests with AddressSanitizer.
 test-asan: setup
-    {{odin}} test . \
+    {{odin}} test "{{source}}" \
         -debug \
         -sanitize:address \
         -vet

@@ -22,7 +22,7 @@ then playback finishes normally. Movement labels control turn style and visual
 character, never override the rhythm.
 
 ```sh
-odin build . -out:psycho
+odin build src -out:psycho
 ./psycho music.wav
 ./psycho --analyze music.wav # optional: fill the cache without opening a window
 ```

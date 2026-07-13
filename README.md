@@ -59,7 +59,7 @@ have an Odin toolchain with its raylib vendor package on your `PATH`, you can
 build directly instead:
 
 ```sh
-odin build . -out:psycho -o:speed
+odin build src -out:psycho -o:speed
 ./psycho ~/Music/your-song.flac
 ```
 
