@@ -1,0 +1,31 @@
+package main
+
+import "core:math"
+
+steer_input :: proc(left, right: bool) -> f32 {
+	direction: f32
+	if left do direction += 1
+	if right do direction -= 1
+	return direction
+}
+
+mouse_lane_target :: proc(mouse_x, screen_width: i32) -> f32 {
+	if screen_width <= 1 do return 0
+	// The outer 8% on either side is already full lock, keeping steering reachable in a window.
+	center := f32(screen_width) * 0.5
+	half_control_width := f32(screen_width) * 0.42
+	return clamp((center - f32(mouse_x)) / half_control_width, -1, 1)
+}
+
+smooth_mouse_lane :: proc(current, target, dt: f32, response_rate: f32 = 26) -> f32 {
+	response := 1 - f32(math.exp(f64(-response_rate * max(0, dt))))
+	return clamp(current + (target - current) * response, -1, 1)
+}
+
+ride_finished :: proc(paused, playback_seen, music_playing: bool) -> bool {
+	return !paused && playback_seen && !music_playing
+}
+
+lane_position :: proc(road_width, normalized_lane: f32) -> f32 {
+	return normalized_lane * road_width * 2 / 3
+}
