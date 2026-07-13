@@ -2,7 +2,7 @@
 
 set shell := ["bash", "-uc"]
 
-# odin   := "./odin-dev/odin"
+# odin   := "./odin-dev/odin" # version dev-2026-07-nightly:819fdc7
 odin   := "odin"
 binary := "psycho"
 cache  := ".psycho_cache"
