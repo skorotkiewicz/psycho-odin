@@ -11,9 +11,11 @@ import "core:time"
 import rl "vendor:raylib"
 
 MAP_MAGIC :: u64(0x50535943484f3031) // PSYCHO01
-MAP_VERSION :: u32(10)
+MAP_VERSION :: u32(1)
 STEP :: f32(0.10)
 ROAD_STEP :: f32(5.5)
+CHASE_CAMERA_Z :: f32(-6.35)
+ROAD_CAMERA_CLEARANCE :: f32(1.5)
 
 PICKUP :: i32(1)
 HAZARD :: i32(2)
@@ -1045,6 +1047,80 @@ self_test :: proc() {
 		"future cached centerline must remain ahead in the local tangent frame",
 	)
 	assert(abs(future_center.x) > 0.1, "future tangent transform must expose the upcoming bend")
+	worst_uncropped_z, worst_cropped_z: f32 = 1e9, 1e9
+	shallowest_cropped_z: f32 = -1e9
+	worst_near_i := 0
+	near_test_fractions := [5]f32{0, 0.2, 0.5, 0.8, 0.95}
+	for i in 0 ..< len(nodes) - 1 {
+		for fraction in near_test_fractions {
+			base_x := nodes[i].curve_x + (nodes[i + 1].curve_x - nodes[i].curve_x) * fraction
+			base_y := nodes[i].curve_y + (nodes[i + 1].curve_y - nodes[i].curve_y) * fraction
+			base_z := nodes[i].curve_z + (nodes[i + 1].curve_z - nodes[i].curve_z) * fraction
+			base_heading :=
+				nodes[i].heading + (nodes[i + 1].heading - nodes[i].heading) * fraction
+			uncropped_center := road_point(nodes, i, 0, base_x, base_y, base_z, base_heading)
+			playhead := f32(i) + fraction
+			sample_position := road_near_sample_position(
+				nodes,
+				playhead,
+				base_x,
+				base_y,
+				base_z,
+				base_heading,
+			)
+			sample_width := width_sample(nodes, sample_position)
+			cropped_center := road_point_sample(
+				nodes,
+				sample_position,
+				0,
+				base_x,
+				base_y,
+				base_z,
+				base_heading,
+			)
+			cropped_left := road_point_sample(
+				nodes,
+				sample_position,
+				-sample_width,
+				base_x,
+				base_y,
+				base_z,
+				base_heading,
+			)
+			cropped_right := road_point_sample(
+				nodes,
+				sample_position,
+				sample_width,
+				base_x,
+				base_y,
+				base_z,
+				base_heading,
+			)
+			if uncropped_center.z < worst_uncropped_z {
+				worst_uncropped_z = uncropped_center.z
+				worst_near_i = i
+			}
+			worst_cropped_z = min(worst_cropped_z, cropped_left.z, cropped_right.z)
+			shallowest_cropped_z = max(shallowest_cropped_z, cropped_center.z)
+		}
+	}
+	fmt.printfln(
+		"self-test: near-road clip old %.2f at slice %d; edge %.2f shallow %.2f; camera %.2f",
+		worst_uncropped_z,
+		worst_near_i,
+		worst_cropped_z,
+		shallowest_cropped_z,
+		CHASE_CAMERA_Z,
+	)
+	assert(worst_uncropped_z < CHASE_CAMERA_Z, "the regression fixture must cross the camera")
+	assert(
+		worst_cropped_z > CHASE_CAMERA_Z + 1,
+		"the first visible road edge must stay safely ahead of the camera",
+	)
+	assert(
+		shallowest_cropped_z < -3,
+		"the first visible road edge must extend behind the player and fill the foreground",
+	)
 	sample_boundary := f32(probe_i + 10)
 	preview_before := road_center_sample(
 		nodes,
@@ -1317,6 +1393,36 @@ track_sample_indices :: proc(
 	return
 }
 
+road_point_sample :: proc(
+	nodes: []Track_Node,
+	node_position, offset, base_x, base_y, base_z, base_heading: f32,
+) -> rl.Vector3 {
+	i, next_i, fraction := track_sample_indices(nodes, node_position)
+	center_x := nodes[i].curve_x + (nodes[next_i].curve_x - nodes[i].curve_x) * fraction
+	center_y := nodes[i].curve_y + (nodes[next_i].curve_y - nodes[i].curve_y) * fraction
+	center_z := nodes[i].curve_z + (nodes[next_i].curve_z - nodes[i].curve_z) * fraction
+	heading :=
+		nodes[i].heading + wrapped_angle_delta(nodes[next_i].heading, nodes[i].heading) * fraction
+	bank := road_bank(nodes, i) + (road_bank(nodes, next_i) - road_bank(nodes, i)) * fraction
+	node_cos := f32(math.cos(f64(heading)))
+	node_sin := f32(math.sin(f64(heading)))
+	world_x := center_x + offset * node_cos
+	world_z := center_z - offset * node_sin
+	dx, dz := world_x - base_x, world_z - base_z
+	base_cos := f32(math.cos(f64(base_heading)))
+	base_sin := f32(math.sin(f64(base_heading)))
+	return {
+		dx * base_cos - dz * base_sin,
+		center_y - base_y - offset * bank,
+		dx * base_sin + dz * base_cos,
+	}
+}
+
+width_sample :: proc(nodes: []Track_Node, node_position: f32) -> f32 {
+	i, next_i, fraction := track_sample_indices(nodes, node_position)
+	return nodes[i].width + (nodes[next_i].width - nodes[i].width) * fraction
+}
+
 road_center_sample :: proc(
 	nodes: []Track_Node,
 	node_position, base_x, base_y, base_z, base_heading: f32,
@@ -1329,6 +1435,43 @@ road_center_sample :: proc(
 		a.y + (b.y - a.y) * fraction,
 		a.z + (b.z - a.z) * fraction,
 	}
+}
+
+road_near_sample_position :: proc(
+	nodes: []Track_Node,
+	playhead, base_x, base_y, base_z, base_heading: f32,
+) -> f32 {
+	target_z := CHASE_CAMERA_Z + ROAD_CAMERA_CLEARANCE
+	front_position := playhead
+	for step in 1 ..= 8 {
+		back_position := playhead - f32(step)
+		back_center := road_center_sample(
+			nodes,
+			back_position,
+			base_x,
+			base_y,
+			base_z,
+			base_heading,
+		)
+		if back_center.z <= target_z {
+			for _ in 0 ..< 12 {
+				middle_position := (back_position + front_position) * 0.5
+				middle_center := road_center_sample(
+					nodes,
+					middle_position,
+					base_x,
+					base_y,
+					base_z,
+					base_heading,
+				)
+				if middle_center.z <= target_z do back_position = middle_position
+				else do front_position = middle_position
+			}
+			return front_position
+		}
+		front_position = back_position
+	}
+	return front_position
 }
 
 heading_sample :: proc(nodes: []Track_Node, node_position: f32) -> f32 {
@@ -1402,7 +1545,7 @@ draw_ride :: proc(
 		position   = {
 			player_x * 0.72 + shake_x,
 			camera_ground_y + 2.55 + abs(turn_preview) * 0.8 + abs(pitch_preview) * 1.2 + shake_y,
-			-6.35,
+			CHASE_CAMERA_Z,
 		},
 		target     = {target_x, target_y + 0.05, max(24, far_look.z)},
 		up         = {-camera_bank, 1, 0},
@@ -1416,26 +1559,63 @@ draw_ride :: proc(
 	if closed_track do unique_nodes -= 1
 	visible_segments := min(100, max(0, len(nodes) - 1 - current))
 	if closed_track do visible_segments = min(100, unique_nodes)
-	for segment in 0 ..< visible_segments {
-		i := current + segment
+	render_segments := visible_segments
+	if render_segments > 0 do render_segments += 1
+	rear_near_position := road_near_sample_position(
+		nodes,
+		playhead,
+		base_x,
+		base_y,
+		base_z,
+		base_heading,
+	)
+	for render_segment in 0 ..< render_segments {
+		course_segment := max(0, render_segment - 1)
+		is_rear_skirt := render_segment == 0
+		i := current + course_segment
 		if closed_track do i %= unique_nodes
-		road_next := i + 1
 		node := nodes[i]
-		left := road_point(nodes, i, -node.width, base_x, base_y, base_z, base_heading)
-		right := road_point(nodes, i, node.width, base_x, base_y, base_z, base_heading)
-		next_left := road_point(
+		road_near_position := f32(current + course_segment)
+		road_far_position := f32(current + course_segment + 1)
+		if is_rear_skirt {
+			road_near_position = rear_near_position
+			road_far_position = playhead
+		} else if course_segment == 0 {
+			road_near_position = playhead
+		}
+		near_width := width_sample(nodes, road_near_position)
+		far_width := width_sample(nodes, road_far_position)
+		left := road_point_sample(
 			nodes,
-			road_next,
-			-nodes[road_next].width,
+			road_near_position,
+			-near_width,
 			base_x,
 			base_y,
 			base_z,
 			base_heading,
 		)
-		next_right := road_point(
+		right := road_point_sample(
 			nodes,
-			road_next,
-			nodes[road_next].width,
+			road_near_position,
+			near_width,
+			base_x,
+			base_y,
+			base_z,
+			base_heading,
+		)
+		next_left := road_point_sample(
+			nodes,
+			road_far_position,
+			-far_width,
+			base_x,
+			base_y,
+			base_z,
+			base_heading,
+		)
+		next_right := road_point_sample(
+			nodes,
+			road_far_position,
+			far_width,
 			base_x,
 			base_y,
 			base_z,
@@ -1449,42 +1629,40 @@ draw_ride :: proc(
 		)
 		// Shade each lane independently: this makes steering and traffic readable at speed.
 		for lane_i in 0 ..< 3 {
-			near_left_offset := -node.width + f32(lane_i) * node.width * 2 / 3
-			near_right_offset := -node.width + f32(lane_i + 1) * node.width * 2 / 3
-			far_left_offset :=
-				-nodes[road_next].width + f32(lane_i) * nodes[road_next].width * 2 / 3
-			far_right_offset :=
-				-nodes[road_next].width + f32(lane_i + 1) * nodes[road_next].width * 2 / 3
-			lane_left := road_point(
+			near_left_offset := -near_width + f32(lane_i) * near_width * 2 / 3
+			near_right_offset := -near_width + f32(lane_i + 1) * near_width * 2 / 3
+			far_left_offset := -far_width + f32(lane_i) * far_width * 2 / 3
+			far_right_offset := -far_width + f32(lane_i + 1) * far_width * 2 / 3
+			lane_left := road_point_sample(
 				nodes,
-				i,
+				road_near_position,
 				near_left_offset,
 				base_x,
 				base_y,
 				base_z,
 				base_heading,
 			)
-			lane_right := road_point(
+			lane_right := road_point_sample(
 				nodes,
-				i,
+				road_near_position,
 				near_right_offset,
 				base_x,
 				base_y,
 				base_z,
 				base_heading,
 			)
-			lane_next_left := road_point(
+			lane_next_left := road_point_sample(
 				nodes,
-				road_next,
+				road_far_position,
 				far_left_offset,
 				base_x,
 				base_y,
 				base_z,
 				base_heading,
 			)
-			lane_next_right := road_point(
+			lane_next_right := road_point_sample(
 				nodes,
-				road_next,
+				road_far_position,
 				far_right_offset,
 				base_x,
 				base_y,
@@ -1520,10 +1698,26 @@ draw_ride :: proc(
 		if i % 2 == 0 {
 			for lane_mark in -1 ..= 1 {
 				if lane_mark == 0 do continue
-				mark := f32(lane_mark) * node.width / 3
-				next_mark := f32(lane_mark) * nodes[road_next].width / 3
-				p0 := road_point(nodes, i, mark, base_x, base_y, base_z, base_heading)
-				p1 := road_point(nodes, road_next, next_mark, base_x, base_y, base_z, base_heading)
+				mark := f32(lane_mark) * near_width / 3
+				next_mark := f32(lane_mark) * far_width / 3
+				p0 := road_point_sample(
+					nodes,
+					road_near_position,
+					mark,
+					base_x,
+					base_y,
+					base_z,
+					base_heading,
+				)
+				p1 := road_point_sample(
+					nodes,
+					road_far_position,
+					next_mark,
+					base_x,
+					base_y,
+					base_z,
+					base_heading,
+				)
 				rl.DrawLine3D(
 					lift_road_overlay(p0, 0.055),
 					lift_road_overlay(p1, 0.055),
@@ -1532,7 +1726,7 @@ draw_ride :: proc(
 			}
 		}
 
-		if node.kind != 0 && segment > 1 {
+		if node.kind != 0 && course_segment > 1 {
 			object := road_point(
 				nodes,
 				i,
@@ -1564,7 +1758,7 @@ draw_ride :: proc(
 			}
 		}
 
-		if node.feature != 0 {
+		if !is_rear_skirt && node.feature != 0 {
 			tl, tr := left, right
 			height: f32 = 5.6
 			feature_color := pace_color(node.pace, 0.88, 175)
@@ -1585,12 +1779,12 @@ draw_ride :: proc(
 				rl.DrawLine3D(right, tl, pace_color(1 - node.pace, 0.9, 120))
 			}
 		}
-		if node.section == DROP && i % 7 == 0 {
+		if !is_rear_skirt && node.section == DROP && i % 7 == 0 {
 			tower_color := pace_color(node.pace, 0.38 + node.energy * 0.36, 180)
 			rl.DrawCube({left.x - 2.5, left.y - 3.5, center.z}, 1.2, 7, 1.2, tower_color)
 			rl.DrawCube({right.x + 2.5, right.y - 3.5, center.z}, 1.2, 7, 1.2, tower_color)
 		}
-		if i % 6 == 0 {
+		if !is_rear_skirt && i % 6 == 0 {
 			panel_height := 1.5 + node.energy * 3.5 + node.pace * 1.8
 			panel_color := pace_color(node.pace, 0.34 + node.pace * 0.35, 135)
 			rl.DrawCube(
@@ -1608,7 +1802,7 @@ draw_ride :: proc(
 				panel_color,
 			)
 		}
-		if i % 5 == 0 {
+		if !is_rear_skirt && i % 5 == 0 {
 			star_x := f32(((i * 73) % 31) - 15) * 1.6
 			star_y := f32(((i * 47) % 17) - 3) * 1.2
 			star_color := pace_color(node.pace, 0.62 + node.high * 0.35, 180)
