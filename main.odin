@@ -12,7 +12,6 @@ MAP_MAGIC :: u64(0x50535943484f3031) // PSYCHO01
 MAP_VERSION :: u32(7)
 STEP :: f32(0.10)
 ROAD_STEP :: f32(5.5)
-LANE_WIDTH :: f32(2.6)
 
 PICKUP :: i32(1)
 HAZARD :: i32(2)
@@ -482,6 +481,10 @@ smooth_mouse_lane :: proc(current, target, dt: f32) -> f32 {
 	return clamp(current + (target - current) * response, -1, 1)
 }
 
+lane_position :: proc(road_width, normalized_lane: f32) -> f32 {
+	return normalized_lane * road_width * 2 / 3
+}
+
 pace_color :: proc(pace, value: f32, alpha: u8 = 255) -> rl.Color {
 	// Cool cyan climbs travel through violet into hot gold/red descents.
 	p := clamp(pace, 0, 1)
@@ -519,7 +522,37 @@ course_plan_point :: proc(
 	}
 }
 
-draw_course_map :: proc(nodes: []Track_Node, current: int, x, y, width, height: i32) {
+Course_Map_Bounds :: struct {
+	min_height, max_height: f32,
+	min_x, max_x:           f32,
+	min_z, max_z:           f32,
+}
+
+calculate_course_map_bounds :: proc(nodes: []Track_Node) -> Course_Map_Bounds {
+	if len(nodes) == 0 do return {}
+	bounds := Course_Map_Bounds {
+		min_height = nodes[0].curve_y,
+		max_height = nodes[0].curve_y,
+		min_x      = nodes[0].curve_x,
+		max_x      = nodes[0].curve_x,
+		min_z      = nodes[0].curve_z,
+		max_z      = nodes[0].curve_z,
+	}
+	for node in nodes {
+		bounds.min_height = min(bounds.min_height, node.curve_y)
+		bounds.max_height = max(bounds.max_height, node.curve_y)
+		bounds.min_x, bounds.max_x = min(bounds.min_x, node.curve_x), max(bounds.max_x, node.curve_x)
+		bounds.min_z, bounds.max_z = min(bounds.min_z, node.curve_z), max(bounds.max_z, node.curve_z)
+	}
+	return bounds
+}
+
+draw_course_map :: proc(
+	nodes: []Track_Node,
+	current: int,
+	x, y, width, height: i32,
+	bounds: Course_Map_Bounds,
+) {
 	if len(nodes) < 2 || width < 80 || height < 50 do return
 	rl.DrawRectangle(x, y, width, height, rl.Color{2, 5, 17, 218})
 	rl.DrawRectangleLines(x, y, width, height, rl.Color{80, 135, 190, 130})
@@ -531,15 +564,6 @@ draw_course_map :: proc(nodes: []Track_Node, current: int, x, y, width, height: 
 	plan_gap: f32 = 12
 	plan_left := left + profile_width + plan_gap
 	plan_width := total_width - profile_width - plan_gap
-	min_height, max_height := nodes[0].curve_y, nodes[0].curve_y
-	min_x, max_x := nodes[0].curve_x, nodes[0].curve_x
-	min_z, max_z := nodes[0].curve_z, nodes[0].curve_z
-	for node in nodes {
-		min_height = min(min_height, node.curve_y)
-		max_height = max(max_height, node.curve_y)
-		min_x, max_x = min(min_x, node.curve_x), max(max_x, node.curve_x)
-		min_z, max_z = min(min_z, node.curve_z), max(max_z, node.curve_z)
-	}
 	rl.DrawLine(
 		i32(plan_left - plan_gap * 0.5),
 		i32(top),
@@ -555,8 +579,8 @@ draw_course_map :: proc(nodes: []Track_Node, current: int, x, y, width, height: 
 		top,
 		profile_width,
 		plot_height,
-		min_height,
-		max_height,
+		bounds.min_height,
+		bounds.max_height,
 	)
 	previous_plan := course_plan_point(
 		nodes,
@@ -565,10 +589,10 @@ draw_course_map :: proc(nodes: []Track_Node, current: int, x, y, width, height: 
 		top,
 		plan_width,
 		plot_height,
-		min_x,
-		max_x,
-		min_z,
-		max_z,
+		bounds.min_x,
+		bounds.max_x,
+		bounds.min_z,
+		bounds.max_z,
 	)
 	for sample in 1 ..< samples_on_map {
 		node_i := sample * (len(nodes) - 1) / (samples_on_map - 1)
@@ -579,8 +603,8 @@ draw_course_map :: proc(nodes: []Track_Node, current: int, x, y, width, height: 
 			top,
 			profile_width,
 			plot_height,
-			min_height,
-			max_height,
+			bounds.min_height,
+			bounds.max_height,
 		)
 		plan_point := course_plan_point(
 			nodes,
@@ -589,10 +613,10 @@ draw_course_map :: proc(nodes: []Track_Node, current: int, x, y, width, height: 
 			top,
 			plan_width,
 			plot_height,
-			min_x,
-			max_x,
-			min_z,
-			max_z,
+			bounds.min_x,
+			bounds.max_x,
+			bounds.min_z,
+			bounds.max_z,
 		)
 		alpha: u8 = 215
 		if node_i < current do alpha = 105
@@ -610,8 +634,8 @@ draw_course_map :: proc(nodes: []Track_Node, current: int, x, y, width, height: 
 		top,
 		profile_width,
 		plot_height,
-		min_height,
-		max_height,
+		bounds.min_height,
+		bounds.max_height,
 	)
 	rl.DrawCircleV(marker, 5.5, rl.Color{2, 5, 17, 255})
 	rl.DrawCircleLines(i32(marker.x), i32(marker.y), 6, rl.WHITE)
@@ -623,10 +647,10 @@ draw_course_map :: proc(nodes: []Track_Node, current: int, x, y, width, height: 
 		top,
 		plan_width,
 		plot_height,
-		min_x,
-		max_x,
-		min_z,
-		max_z,
+		bounds.min_x,
+		bounds.max_x,
+		bounds.min_z,
+		bounds.max_z,
 	)
 	rl.DrawCircleV(plan_marker, 4.5, rl.Color{2, 5, 17, 255})
 	rl.DrawCircleLines(i32(plan_marker.x), i32(plan_marker.y), 5, rl.WHITE)
@@ -708,6 +732,19 @@ self_test :: proc() {
 	)
 	assert(abs(probe_left.x + probe.width) < 0.01 && abs(probe_left.z) < 0.01)
 	assert(abs(probe_right.x - probe.width) < 0.01 && abs(probe_right.z) < 0.01)
+	future_i := min(len(nodes) - 1, probe_i + 10)
+	future_center := road_point(
+		nodes,
+		future_i,
+		0,
+		probe.curve_x,
+		probe.curve_y,
+		probe.curve_z,
+		probe.heading,
+	)
+	assert(future_center.z > 1, "future cached centerline must remain ahead in the local tangent frame")
+	assert(abs(future_center.x) > 0.1, "future tangent transform must expose the upcoming bend")
+	assert(abs(lane_position(4.8, 1) - 3.2) < 0.001)
 	assert(steer_input(true, false) > 0, "A/left must move toward screen-left for a +Z camera")
 	assert(mouse_lane_target(0, 1000) > 0.99)
 	assert(abs(mouse_lane_target(500, 1000)) < 0.001)
@@ -797,7 +834,16 @@ self_test :: proc() {
 	loaded, ok := load_map(path)
 	defer delete(loaded)
 	assert(ok && len(loaded) == len(nodes) && loaded[0].lane == nodes[0].lane)
+	assert(loaded[0].curve_z == nodes[0].curve_z && loaded[0].heading == nodes[0].heading)
+	assert(loaded[len(loaded) - 1].curve_z == nodes[len(nodes) - 1].curve_z)
 	fmt.println("self-test: ok")
+}
+
+road_bank :: proc(nodes: []Track_Node, i: int) -> f32 {
+	node_i := clamp(i, 0, len(nodes) - 1)
+	previous := nodes[max(0, node_i - 1)]
+	next := nodes[min(len(nodes) - 1, node_i + 1)]
+	return clamp((next.heading - previous.heading) * 3.6, -0.68, 0.68)
 }
 
 road_point :: proc(
@@ -806,9 +852,7 @@ road_point :: proc(
 	offset, base_x, base_y, base_z, base_heading: f32,
 ) -> rl.Vector3 {
 	node := nodes[clamp(i, 0, len(nodes) - 1)]
-	previous := nodes[max(0, i - 1)]
-	next := nodes[min(len(nodes) - 1, i + 1)]
-	bank := clamp((next.heading - previous.heading) * 3.6, -0.68, 0.68)
+	bank := road_bank(nodes, i)
 	node_cos := f32(math.cos(f64(node.heading)))
 	node_sin := f32(math.sin(f64(node.heading)))
 	world_x := node.curve_x + offset * node_cos
@@ -833,6 +877,8 @@ draw_ride :: proc(
 	base_y := nodes[current].curve_y + (nodes[next_i].curve_y - nodes[current].curve_y) * fraction
 	base_z := nodes[current].curve_z + (nodes[next_i].curve_z - nodes[current].curve_z) * fraction
 	base_heading := nodes[current].heading + (nodes[next_i].heading - nodes[current].heading) * fraction
+	base_width := nodes[current].width + (nodes[next_i].width - nodes[current].width) * fraction
+	base_bank := road_bank(nodes, current) + (road_bank(nodes, next_i) - road_bank(nodes, current)) * fraction
 	shake_x := f32(math.sin(rl.GetTime() * 61)) * shake * 0.24
 	shake_y := f32(math.sin(rl.GetTime() * 47)) * shake * 0.18
 	pace := nodes[current].pace
@@ -844,12 +890,17 @@ draw_ride :: proc(
 	future_heading := nodes[min(current + 10, len(nodes) - 1)].heading
 	turn_preview := clamp(future_heading - base_heading, -0.7, 0.7)
 	camera_bank := clamp(turn_preview * 0.48 + steer_lean * 0.035, -0.29, 0.29)
-	player_x := player_lane * LANE_WIDTH
+	player_x := lane_position(base_width, player_lane)
 	target_x := near_look.x * 0.38 + far_look.x * 0.62 + player_x * 0.10
 	target_y := near_look.y * 0.24 + far_look.y * 0.36
 	turn_fov := min(11, abs(turn_preview) * 24)
+	camera_ground_y := -(player_x * 0.72) * base_bank
 	camera := rl.Camera3D {
-		position   = {player_x * 0.72 + shake_x, 2.55 + abs(turn_preview) * 1.1 + shake_y, -6.35},
+		position   = {
+			player_x * 0.72 + shake_x,
+			camera_ground_y + 2.55 + abs(turn_preview) * 1.1 + shake_y,
+			-6.35,
+		},
 		target     = {target_x, target_y + 0.05, max(24, far_look.z)},
 		up         = {-camera_bank, 1, 0},
 		fovy       = 66 + pace_curve * 18 + turn_fov,
@@ -914,7 +965,7 @@ draw_ride :: proc(
 			object := road_point(
 				nodes,
 				i,
-				f32(node.lane) * LANE_WIDTH,
+				lane_position(node.width, f32(node.lane)),
 				base_x,
 				base_y,
 				base_z,
@@ -1013,8 +1064,8 @@ draw_ride :: proc(
 		}
 	}
 
-	ship_x := player_lane * LANE_WIDTH
-	ship_y: f32 = 0.38
+	ship_x := player_x
+	ship_y := 0.38 - ship_x * base_bank
 	ship_color := pace_color(max(0.48, pace + pulse * 0.18), 1)
 	trail_count := 9 + int(pace_curve * 14)
 	for trail in 1 ..= trail_count {
@@ -1045,20 +1096,20 @@ draw_ride :: proc(
 	)
 	rl.DrawTriangle3D(
 		{ship_x, ship_y, 1.22},
-		{ship_x - 1.48, 0.18 + wing_tilt, -0.34},
+		{ship_x - 1.48, ship_y - 0.20 + base_bank * 1.48 + wing_tilt, -0.34},
 		{ship_x, ship_y, 0.02},
 		ship_color,
 	)
 	rl.DrawTriangle3D(
 		{ship_x, ship_y, 1.22},
 		{ship_x, ship_y, 0.02},
-		{ship_x + 1.48, 0.18 - wing_tilt, -0.34},
+		{ship_x + 1.48, ship_y - 0.20 - base_bank * 1.48 - wing_tilt, -0.34},
 		ship_color,
 	)
 	for side in -1 ..= 1 {
 		if side == 0 do continue
 		pod_x := ship_x + f32(side) * 0.55
-		pod_y := ship_y - f32(side) * wing_tilt * 0.35
+		pod_y := ship_y - f32(side) * (base_bank * 0.55 + wing_tilt * 0.35)
 		rl.DrawCylinderEx(
 			{pod_x, pod_y, -0.46},
 			{pod_x, pod_y, 0.72},
@@ -1144,6 +1195,7 @@ main :: proc() {
 		fmt.println("map: analysis complete")
 		return
 	}
+	map_bounds := calculate_course_map_bounds(nodes)
 
 	rl.SetConfigFlags({.MSAA_4X_HINT, .VSYNC_HINT, .WINDOW_RESIZABLE})
 	rl.InitWindow(1280, 720, "PSYCHO // sound ride")
@@ -1361,7 +1413,7 @@ main :: proc() {
 		rl.DrawRectangle(36, 98, i32(430 * progress), 4, rl.Color{50, 220, 255, 255})
 		map_width := i32(clamp(f32(w) * 0.35, 280, 440))
 		map_height := i32(clamp(f32(h) * 0.20, 140, 180))
-		draw_course_map(nodes, current, 24, 124, map_width, map_height)
+		draw_course_map(nodes, current, 24, 124, map_width, map_height, map_bounds)
 		for hull in 0 ..< 3 {
 			hull_color := rl.Color{45, 55, 80, 255}
 			if hull < shield do hull_color = rl.Color{70, 255, 145, 255}
