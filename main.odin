@@ -9,7 +9,7 @@ import "core:strings"
 import rl "vendor:raylib"
 
 MAP_MAGIC :: u64(0x50535943484f3031) // PSYCHO01
-MAP_VERSION :: u32(3)
+MAP_VERSION :: u32(4)
 STEP :: f32(0.10)
 ROAD_STEP :: f32(5.5)
 LANE_WIDTH :: f32(2.6)
@@ -17,6 +17,17 @@ LANE_WIDTH :: f32(2.6)
 PICKUP :: i32(1)
 HAZARD :: i32(2)
 SHIELD :: i32(3)
+BOOST :: i32(4)
+
+CLIMB :: i32(0)
+DROP :: i32(1)
+SLALOM :: i32(2)
+TUNNEL :: i32(3)
+
+GATE :: i32(1)
+ARCH :: i32(2)
+PORTAL :: i32(3)
+RAMP :: i32(4)
 
 PSYCHO_SHADER :: `#version 330
 in vec2 fragTexCoord;
@@ -46,11 +57,13 @@ void main() {
 
 Track_Node :: struct {
 	bass, mid, high:  f32,
+	energy, width:    f32,
 	curve_x, curve_y: f32,
 	distance:         f32,
 	beat:             f32,
 	lane:             i32,
 	kind, tone:       i32,
+	section, feature: i32,
 }
 
 Cache_Header :: struct {
@@ -179,20 +192,53 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 	}
 	mean_energy = max(mean_energy / f32(count), 0.0001)
 
-	// Second pass: song-relative dynamics become speed, hills, curves and traffic.
-	smooth_energy, flux_average, prior_bass, prior_mid: f32
-	height, slope, curve, turn, distance: f32
-	last_beat := -10
+	// Second pass normalizes dynamics against the whole song so quiet and loud masters play alike.
+	smooth_energy: f32
 	for node_i in 0 ..< count {
 		node := &nodes[node_i]
 		raw_energy := node.bass * 0.9 + node.mid * 0.65 + node.high * 0.35
 		intensity := clamp(raw_energy / (mean_energy * 2.15), 0, 1)
 		if node_i == 0 do smooth_energy = intensity
-		smooth_energy = smooth_energy * 0.84 + intensity * 0.16
+		smooth_energy = smooth_energy * 0.82 + intensity * 0.18
 		band_scale := 1 / (mean_energy * 2.4)
 		node.bass = clamp(node.bass * band_scale, 0, 1)
 		node.mid = clamp(node.mid * band_scale, 0, 1)
 		node.high = clamp(node.high * band_scale, 0, 1)
+		node.energy = smooth_energy
+	}
+
+	// Third pass composes six-second musical movements instead of one generic wobble.
+	SECTION_LENGTH :: 64
+	flux_average, prior_bass, prior_mid: f32
+	height, slope, curve, turn, distance: f32
+	section, previous_section := CLIMB, CLIMB
+	section_direction: f32 = 1
+	last_beat := -10
+	for node_i in 0 ..< count {
+		node := &nodes[node_i]
+		section_start := (node_i / SECTION_LENGTH) * SECTION_LENGTH
+		if node_i % SECTION_LENGTH == 0 {
+			previous_section = section
+			end := min(count, node_i + SECTION_LENGTH)
+			bass, mid, high, energy: f32
+			for look in node_i ..< end {
+				bass += nodes[look].bass
+				mid += nodes[look].mid
+				high += nodes[look].high
+				energy += nodes[look].energy
+			}
+			n := f32(max(1, end - node_i))
+			bass, mid, high, energy = bass / n, mid / n, high / n, energy / n
+			if energy < 0.32 do section = CLIMB
+			else if bass >= mid && bass >= high do section = DROP
+			else if high > bass && high > mid * 0.28 do section = TUNNEL
+			else do section = SLALOM
+			section_direction = 1
+			if ((u32(node_i / SECTION_LENGTH) * 747796405 + 2891336453) & 1) == 0 do section_direction = -1
+		}
+		node.section = section
+		phase := f32(node_i - section_start) / f32(SECTION_LENGTH)
+		seed := u32(node_i) * 1664525 + 1013904223
 
 		flux := max(0, node.bass - prior_bass) * 0.75 + max(0, node.mid - prior_mid) * 0.4
 		flux_average = flux_average * 0.9 + flux * 0.1
@@ -203,34 +249,62 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 		}
 		prior_bass, prior_mid = node.bass, node.mid
 
-		seed := u32(node_i) * 1664525 + 1013904223
 		node.lane = i32(seed % 3) - 1
+		if section == SLALOM do node.lane = i32((node_i / 3) % 3) - 1
+		if section == TUNNEL do node.lane = i32((node_i / 3) % 2) * 2 - 1
 		if node.bass >= node.mid && node.bass >= node.high do node.tone = 0
 		else if node.mid >= node.high do node.tone = 1
 		else do node.tone = 2
 		roll := int((seed >> 8) % 100)
 		if node.kind == 0 && node_i > 0 && node_i % 200 == 100 {
 			node.kind = SHIELD
-		} else if node.kind == 0 && node_i % 3 == 0 && roll < 72 && node.mid + node.high > 0.25 {
-			node.kind = PICKUP
-			node.beat = 0.18 + min(0.35, node.high * 0.4)
-		} else if node.kind == 0 && smooth_energy > 0.58 && node_i % 5 == 0 && roll < 68 {
+		} else if node.kind == 0 && node_i % SECTION_LENGTH == 3 {
+			node.kind = BOOST
+		} else if node.kind == 0 && node.energy > 0.48 && node_i % 5 == 2 && roll < 78 {
 			node.kind = HAZARD
+		} else if node.kind == 0 && node_i % 3 == 0 && roll < 78 && node.mid + node.high > 0.20 {
+			node.kind = PICKUP
+			node.beat = 0.20 + min(0.38, node.high * 0.45)
 		}
 
-		t := f32(node_i) * STEP
-		target_slope := (0.48 - smooth_energy) * 0.18 + f32(math.sin(f64(t * 0.09))) * 0.018
-		slope = slope * 0.88 + target_slope * 0.12
-		height += slope
-		if abs(height) > 14 {
-			height = clamp(height, -14, 14)
-			slope *= -0.45
+		base_slope := (0.48 - node.energy) * 0.34
+		turn_target: f32
+		switch section {
+		case CLIMB:
+			base_slope += 0.11
+			turn_target = f32(math.sin(f64(phase * math.PI))) * 0.11 * section_direction
+			node.width = 3.9
+		case DROP:
+			base_slope -= 0.13 + node.bass * 0.10
+			turn_target = (0.16 + node.energy * 0.16) * section_direction
+			node.width = 4.8
+		case SLALOM:
+			base_slope += f32(math.sin(f64(phase * 2 * math.PI))) * 0.12
+			turn_target = f32(math.sin(f64(phase * 4 * math.PI))) * 0.78
+			node.width = 4.25
+		case TUNNEL:
+			base_slope += f32(math.sin(f64(phase * 4 * math.PI))) * 0.17
+			turn_target = f32(math.sin(f64(phase * 6 * math.PI))) * 0.62 * section_direction
+			node.width = 4.35
 		}
-		turn_target :=
-			f32(math.sin(f64(t * 0.17 + node.mid * 2.3))) * (0.025 + smooth_energy * 0.07)
-		turn = turn * 0.91 + turn_target * 0.09 - curve * 0.0008
-		curve = clamp(curve + turn, -16, 16)
-		distance += ROAD_STEP * (0.68 + smooth_energy * 1.05)
+		slope = slope * 0.76 + base_slope * 0.24
+		height += slope
+		if abs(height) > 22 {
+			height = clamp(height, -22, 22)
+			slope *= -0.55
+		}
+		turn = turn * 0.70 + turn_target * 0.30 - curve * 0.0012
+		curve += turn
+		if abs(curve) > 30 {
+			curve = clamp(curve, -30, 30)
+			turn *= -0.55
+		}
+		distance += ROAD_STEP * (0.62 + node.energy * 1.25)
+
+		if node_i % SECTION_LENGTH == 0 do node.feature = PORTAL
+		if section == TUNNEL && node_i % 4 == 0 do node.feature = ARCH
+		if node.beat > 0.65 do node.feature = GATE
+		if node_i % SECTION_LENGTH == 0 && previous_section == CLIMB && section == DROP do node.feature = RAMP
 		node.curve_x, node.curve_y, node.distance = curve, height, distance
 	}
 	return nodes
@@ -246,32 +320,48 @@ analyze_file :: proc(path: cstring) -> []Track_Node {
 	return analyze_samples(samples, int(wave.frameCount), int(wave.sampleRate), int(wave.channels))
 }
 
+steer_input :: proc(left, right: bool) -> f32 {
+	direction: f32
+	if left do direction += 1
+	if right do direction -= 1
+	return direction
+}
+
 self_test :: proc() {
-	rate := 1000
-	samples := make([]f32, rate * 4)
+	rate := 8000
+	samples := make([]f32, rate * 24)
 	defer delete(samples)
 	for i in 0 ..< len(samples) {
 		t := f64(i) / f64(rate)
-		amplitude: f32 = 0.025
-		if i >= rate * 2 do amplitude = 0.28
-		samples[i] =
-			f32(math.sin(2 * math.PI * 80 * t)) * amplitude +
-			f32(math.sin(2 * math.PI * 900 * t)) * amplitude * 0.25
-		if i > 2900 && i < 2980 do samples[i] *= 2
+		segment := i / (rate * 6)
+		frequencies := [4]f64{100, 80, 800, 3000}
+		amplitudes := [4]f32{0.02, 0.32, 0.24, 0.20}
+		samples[i] = f32(math.sin(2 * math.PI * frequencies[segment] * t)) * amplitudes[segment]
+		if segment > 0 && i % (rate / 2) < rate / 50 do samples[i] *= 1.8
 	}
 	nodes := analyze_samples(raw_data(samples), len(samples), rate, 1)
 	defer delete(nodes)
-	assert(len(nodes) == 40)
+	assert(len(nodes) == 240)
 	assert(nodes[10].bass >= 0 && nodes[10].bass <= 1)
-	assert(nodes[35].distance - nodes[34].distance > nodes[10].distance - nodes[9].distance)
-	assert(nodes[15].curve_y > nodes[5].curve_y)
-	assert(nodes[38].curve_y < nodes[25].curve_y)
-	pickups, hazards: int
+	assert(nodes[90].distance - nodes[89].distance > nodes[20].distance - nodes[19].distance)
+	pickups, hazards, features: int
+	sections: bit_set[0 ..< 4]
 	for node in nodes {
 		if node.kind == PICKUP do pickups += 1
 		if node.kind == HAZARD do hazards += 1
+		if node.feature != 0 do features += 1
+		sections += {int(node.section)}
+	}
+	min_x, max_x := nodes[0].curve_x, nodes[0].curve_x
+	min_y, max_y := nodes[0].curve_y, nodes[0].curve_y
+	for node in nodes {
+		min_x, max_x = min(min_x, node.curve_x), max(max_x, node.curve_x)
+		min_y, max_y = min(min_y, node.curve_y), max(max_y, node.curve_y)
 	}
 	assert(pickups > 0 && hazards > 0)
+	assert(card(sections) == 4)
+	assert(max_x - min_x > 16 && max_y - min_y > 18 && features > 4)
+	assert(steer_input(true, false) > 0, "A/left must move toward screen-left for a +Z camera")
 
 	path := ".psycho_cache/self-test.map"
 	assert(save_map(path, nodes))
@@ -288,7 +378,7 @@ road_point :: proc(
 ) -> rl.Vector3 {
 	previous := nodes[max(0, i - 1)]
 	next := nodes[min(len(nodes) - 1, i + 1)]
-	bank := clamp((next.curve_x - previous.curve_x) * 0.16, -0.65, 0.65)
+	bank := clamp((next.curve_x - previous.curve_x) * 0.52, -0.72, 0.72)
 	return {
 		nodes[i].curve_x - base_x + offset,
 		nodes[i].curve_y - base_y - offset * bank,
@@ -304,11 +394,14 @@ draw_ride :: proc(nodes: []Track_Node, current: int, fraction, player_lane, puls
 		nodes[current].distance + (nodes[next_i].distance - nodes[current].distance) * fraction
 	shake_x := f32(math.sin(rl.GetTime() * 61)) * shake * 0.24
 	shake_y := f32(math.sin(rl.GetTime() * 47)) * shake * 0.18
-	look := road_point(nodes, min(current + 8, len(nodes) - 1), 0, base_x, base_y, base_distance)
+	look := road_point(nodes, min(current + 12, len(nodes) - 1), 0, base_x, base_y, base_distance)
+	previous := nodes[max(0, current - 1)]
+	next := nodes[min(len(nodes) - 1, current + 1)]
+	camera_bank := clamp((next.curve_x - previous.curve_x) * 0.09, -0.22, 0.22)
 	camera := rl.Camera3D {
 		position   = {player_lane * LANE_WIDTH * 0.3 + shake_x, 3.0 + shake_y, -8.8},
-		target     = {look.x * 0.55, look.y * 0.55 + 0.2, max(24, look.z)},
-		up         = {0, 1, 0},
+		target     = {look.x * 0.20, look.y * 0.32 + 0.15, max(28, look.z)},
+		up         = {-camera_bank, 1, 0},
 		fovy       = 74 + nodes[current].bass * 5,
 		projection = .PERSPECTIVE,
 	}
@@ -316,12 +409,13 @@ draw_ride :: proc(nodes: []Track_Node, current: int, fraction, player_lane, puls
 
 	for i := current; i < min(len(nodes) - 1, current + 86); i += 1 {
 		node := nodes[i]
-		left := road_point(nodes, i, -4.2, base_x, base_y, base_distance)
-		right := road_point(nodes, i, 4.2, base_x, base_y, base_distance)
-		next_left := road_point(nodes, i + 1, -4.2, base_x, base_y, base_distance)
-		next_right := road_point(nodes, i + 1, 4.2, base_x, base_y, base_distance)
+		left := road_point(nodes, i, -node.width, base_x, base_y, base_distance)
+		right := road_point(nodes, i, node.width, base_x, base_y, base_distance)
+		next_left := road_point(nodes, i + 1, -nodes[i + 1].width, base_x, base_y, base_distance)
+		next_right := road_point(nodes, i + 1, nodes[i + 1].width, base_x, base_y, base_distance)
 		center := road_point(nodes, i, 0, base_x, base_y, base_distance)
-		hue := f32((i * 3) % 360)
+		section_hues := [4]f32{205, 8, 292, 155}
+		hue := section_hues[clamp(node.section, 0, 3)] + f32((i * 2) % 55)
 		color := rl.ColorFromHSV(hue + 190, 0.74, 0.25 + node.mid * 0.62)
 		color.a = 205
 		rl.DrawTriangle3D(left, next_left, right, color)
@@ -362,19 +456,51 @@ draw_ride :: proc(nodes: []Track_Node, current: int, fraction, player_lane, puls
 			} else if node.kind == HAZARD {
 				rl.DrawCube(object, 1.25, 1.35, 1.25, rl.Color{245, 40, 72, 235})
 				rl.DrawCubeWires(object, 1.55, 1.65, 1.55, rl.Color{255, 190, 60, 255})
-			} else {
+			} else if node.kind == SHIELD {
 				rl.DrawSphere(object, 0.62, rl.Color{70, 255, 145, 255})
 				rl.DrawSphereWires(object, 0.9, 8, 8, rl.WHITE)
+			} else {
+				rl.DrawCube(object, 0.85, 0.85, 0.85, rl.Color{255, 215, 45, 255})
+				rl.DrawCubeWires(object, 1.25, 1.25, 1.25, rl.WHITE)
 			}
 		}
 
-		if node.beat > 0.65 {
+		if node.feature != 0 {
 			tl, tr := left, right
-			tl.y += 5.6
-			tr.y += 5.6
-			rl.DrawLine3D(left, tl, rl.Color{255, 60, 190, 130})
-			rl.DrawLine3D(right, tr, rl.Color{80, 220, 255, 130})
-			rl.DrawLine3D(tl, tr, rl.Color{220, 120, 255, 150})
+			height: f32 = 5.6
+			feature_color := rl.Color{220, 120, 255, 155}
+			if node.feature == ARCH {
+				height = 4.8
+				feature_color = rl.Color{55, 255, 190, 125}
+			} else if node.feature == PORTAL || node.feature == RAMP {
+				height = 7.2
+				feature_color = rl.Color{255, 210, 55, 200}
+			}
+			tl.y += height
+			tr.y += height
+			rl.DrawLine3D(left, tl, feature_color)
+			rl.DrawLine3D(right, tr, feature_color)
+			rl.DrawLine3D(tl, tr, feature_color)
+			if node.feature == PORTAL || node.feature == RAMP {
+				rl.DrawLine3D(left, tr, rl.Color{255, 80, 210, 120})
+				rl.DrawLine3D(right, tl, rl.Color{70, 220, 255, 120})
+			}
+		}
+		if node.section == DROP && i % 7 == 0 {
+			rl.DrawCube(
+				{left.x - 2.5, left.y - 3.5, center.z},
+				1.2,
+				7,
+				1.2,
+				rl.Color{120, 25, 35, 150},
+			)
+			rl.DrawCube(
+				{right.x + 2.5, right.y - 3.5, center.z},
+				1.2,
+				7,
+				1.2,
+				rl.Color{120, 25, 35, 150},
+			)
 		}
 		if i % 5 == 0 {
 			star_x := f32(((i * 73) % 31) - 15) * 1.6
@@ -435,12 +561,34 @@ main :: proc() {
 	if cache_hit {
 		fmt.printfln("map: loaded %s (%d slices)", map_path, len(nodes))
 	} else {
-		fmt.println("map: analyzing bass, mids, highs and transients...")
+		fmt.println(
+			"map: listening for movements, beats, climbs, drops and strange little roads...",
+		)
 		nodes = analyze_file(path_c)
 		if len(nodes) == 0 {
 			fmt.eprintln("psycho: unsupported or invalid audio file")
 			return
 		}
+		movements: [4]int
+		traffic, surprises: int
+		previous_section: i32 = -1
+		for node in nodes {
+			if node.section != previous_section {
+				movements[node.section] += 1
+				previous_section = node.section
+			}
+			if node.kind != 0 do traffic += 1
+			if node.feature != 0 do surprises += 1
+		}
+		fmt.printfln(
+			"map: composed %d climbs, %d drops, %d slaloms, %d tunnels, %d traffic, %d gates",
+			movements[CLIMB],
+			movements[DROP],
+			movements[SLALOM],
+			movements[TUNNEL],
+			traffic,
+			surprises,
+		)
 		if save_map(map_path, nodes) {
 			fmt.printfln("map: cached %s", map_path)
 		} else {
@@ -496,7 +644,7 @@ main :: proc() {
 	paused, finished: bool
 	visual_fx := true
 	visual_amount: f32 = 0.65
-	pulse, shake: f32
+	pulse, shake, overdrive: f32
 	for !rl.WindowShouldClose() {
 		rl.UpdateMusicStream(music)
 		dt := min(rl.GetFrameTime(), 0.05)
@@ -520,9 +668,10 @@ main :: proc() {
 			volume = min(0.8, volume + 0.05)
 			rl.SetMusicVolume(music, volume)
 		}
-		move: f32
-		if rl.IsKeyDown(.A) || rl.IsKeyDown(.LEFT) do move -= 1
-		if rl.IsKeyDown(.D) || rl.IsKeyDown(.RIGHT) do move += 1
+		move := steer_input(
+			rl.IsKeyDown(.A) || rl.IsKeyDown(.LEFT),
+			rl.IsKeyDown(.D) || rl.IsKeyDown(.RIGHT),
+		)
 		player_lane = clamp(player_lane + move * dt * 2.2, -1, 1)
 
 		time_played := rl.GetMusicTimePlayed(music)
@@ -540,6 +689,7 @@ main :: proc() {
 						else do color_chain = 1
 						last_tone = node.tone
 						multiplier := max(1, min(8, streak / 3 + color_chain))
+						if overdrive > 0 do multiplier *= 2
 						score += int(120 * node.beat + 25) * multiplier
 						best_streak = max(best_streak, streak)
 						pulse = 1
@@ -563,12 +713,17 @@ main :: proc() {
 					shield = min(3, shield + 1)
 					score += 300
 					pulse = 1
+				} else if node.kind == BOOST && aligned {
+					overdrive = 6
+					score += 500
+					pulse, fx_tingle = 1, 1
 				}
 			}
 			last_index = current
 		}
 		pulse = max(0, pulse - dt * 2.8)
 		shake = max(0, shake - dt * 4.5)
+		overdrive = max(0, overdrive - dt)
 		fx_tingle = max(0, fx_tingle - dt * 2.0)
 		fx_beat_hz = 4.0 + f64(nodes[current].bass) * 6.0
 		finished = current >= len(nodes) - 2 && !rl.IsMusicStreamPlaying(music)
@@ -577,6 +732,7 @@ main :: proc() {
 			rl.PlayMusicStream(music)
 			last_index, score, streak, color_chain, last_tone, crashes = 0, 0, 0, 0, -1, 0
 			shield = 3
+			overdrive = 0
 			finished = false
 		}
 
@@ -598,7 +754,8 @@ main :: proc() {
 		rl.SetShaderValue(shader, time_loc, &shader_time, .FLOAT)
 		rl.SetShaderValue(shader, energy_loc, &energy, .FLOAT)
 		rl.SetShaderValue(shader, pulse_loc, &pulse, .FLOAT)
-		rl.SetShaderValue(shader, amount_loc, &visual_amount, .FLOAT)
+		visual_power := min(1, visual_amount + overdrive * 0.035)
+		rl.SetShaderValue(shader, amount_loc, &visual_power, .FLOAT)
 		source := rl.Rectangle{0, 0, f32(scene.texture.width), -f32(scene.texture.height)}
 		destination := rl.Rectangle{0, 0, f32(w), f32(h)}
 		rl.BeginDrawing()
@@ -631,6 +788,28 @@ main :: proc() {
 			15,
 			rl.Color{180, 190, 215, 255},
 		)
+		section_names := [4]cstring{"CLIMB", "DROP", "SLALOM", "TUNNEL"}
+		rl.DrawText(
+			rl.TextFormat(
+				"%s  SPEED %.0f%%",
+				section_names[nodes[current].section],
+				nodes[current].energy * 100,
+			),
+			w - 210,
+			96,
+			18,
+			rl.Color{255, 215, 90, 255},
+		)
+		if overdrive > 0 {
+			rl.DrawText("OVERDRIVE x2", w / 2 - 100, 28, 25, rl.Color{255, 220, 55, 255})
+			rl.DrawRectangle(
+				w / 2 - 100,
+				58,
+				i32(overdrive / 6 * 200),
+				5,
+				rl.Color{255, 100, 50, 255},
+			)
+		}
 		fx_label: cstring = "EXPERIMENTAL FX: OFF [B]"
 		if fx_channels < 2 do fx_label = "EXPERIMENTAL FX: NEEDS STEREO"
 		if fx_on do fx_label = rl.TextFormat("EXPERIMENTAL FX: %.0f%% [B]", fx_amount * 100)

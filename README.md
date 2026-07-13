@@ -1,8 +1,10 @@
 # PSYCHO
 
 An audio-reactive puzzle racer in Odin and raylib. It analyzes song-relative
-bass, mids, highs, dynamics, and transients, then turns them into a banked 3D
-highway with speed changes, climbs, dives, traffic, hazards, and powerups.
+bass, mids, highs, dynamics, and transients, then composes six-second musical
+movements: quiet climbs, bass-heavy drops, mid-driven slaloms, and treble
+tunnels. Each has distinct curves, banking, width, speed, traffic choreography,
+gates, portals, scenery, hazards, boosts, and powerups.
 Generated maps are cached by audio-content hash.
 
 ```sh
@@ -15,7 +17,8 @@ changing the audio or analyzer version creates a new map automatically.
 
 Collect same-color traffic to grow the chain multiplier, dodge red hazards,
 and collect green shields. Three hull hits cause a crash and halve the score,
-but the ride continues.
+but the ride continues. Gold cubes trigger six seconds of double-score
+overdrive and stronger visual effects.
 
 Controls: `A/D` or arrows steer, `Space` pauses, `F` toggles fullscreen,
 `P` toggles the psychedelic post-process, `,`/`.` changes visual strength,
