@@ -4,6 +4,7 @@ import "core:math"
 import rl "vendor:raylib"
 
 CHASE_CAMERA_Z :: f32(-6.35)
+CHASE_CAMERA_MIN_Y :: f32(2.25)
 ROAD_CAMERA_CLEARANCE :: f32(1.5)
 
 closure_correction :: proc(value_delta, derivative_delta, u: f32) -> f32 {

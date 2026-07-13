@@ -47,6 +47,24 @@ fast_camera_preview_max_y :: proc(nodes: []Track_Node) -> (max_y: f32, sample_co
 	return
 }
 
+// Check both banked lane extremes with the largest possible downward crash shake.
+fast_camera_min_y :: proc(nodes: []Track_Node) -> (min_y: f32, sample_count: int) {
+	min_y = 1e9
+	fractions := [3]f32{0, 0.5, 0.95}
+	lanes := [3]f32{-1, 0, 1}
+	for i in 0 ..< len(nodes) - 1 {
+		for fraction in fractions {
+			if pace_sample(nodes, f32(i) + fraction) < 0.65 do continue
+			for lane in lanes {
+				camera := ride_camera(nodes, i, fraction, lane, 0, 0, -0.18)
+				min_y = min(min_y, camera.position.y)
+				sample_count += 1
+			}
+		}
+	}
+	return
+}
+
 self_test :: proc() {
 	rate := 8000
 	samples := make([]f32, rate * 24)
@@ -61,6 +79,13 @@ self_test :: proc() {
 	}
 	nodes := analyze_samples(raw_data(samples), len(samples), rate, 1)
 	defer delete(nodes)
+	min_fast_camera_y, fast_camera_samples := fast_camera_min_y(nodes)
+	fmt.printfln("self-test: fast camera minimum y %.2f", min_fast_camera_y)
+	assert(fast_camera_samples > 0, "the camera-height fixture must contain fast sections")
+	assert(
+		min_fast_camera_y >= CHASE_CAMERA_MIN_Y,
+		"fast banked sections must not pull the chase camera below its height floor",
+	)
 	fast_preview_y, fast_preview_samples := fast_camera_preview_max_y(nodes)
 	fmt.printfln(
 		"self-test: fast camera preview max y %.0f / %d",

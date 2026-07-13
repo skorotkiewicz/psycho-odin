@@ -68,12 +68,12 @@ ride_camera :: proc(
 	turn_fov := min(11, abs(turn_preview) * 24)
 	pitch_fov := min(8, abs(pitch_preview) * 24)
 	camera_ground_y := -(player_x * 0.72) * base_bank
+	camera_y := max(
+		CHASE_CAMERA_MIN_Y,
+		camera_ground_y + 2.55 + abs(turn_preview) * 0.8 + abs(pitch_preview) * 1.2 + shake_y,
+	)
 	return {
-		position = {
-			player_x * 0.72 + shake_x,
-			camera_ground_y + 2.55 + abs(turn_preview) * 0.8 + abs(pitch_preview) * 1.2 + shake_y,
-			CHASE_CAMERA_Z,
-		},
+		position = {player_x * 0.72 + shake_x, camera_y, CHASE_CAMERA_Z},
 		target = {target_x, target_y + 0.05, target_z},
 		up = {-camera_bank, 1, 0},
 		fovy = 66 + pace_curve * 18 + turn_fov + pitch_fov,
