@@ -1676,22 +1676,6 @@ draw_ride :: proc(
 			rl.DrawTriangle3D(lane_right, lane_next_left, lane_next_right, lane_color)
 		}
 
-		grid_color := pace_color(node.pace, 0.58 + node.pace * 0.32, 105)
-		if i % 2 == 0 {
-			rl.DrawLine3D(
-				lift_road_overlay(left, 0.035),
-				lift_road_overlay(right, 0.035),
-				grid_color,
-			)
-		}
-		if node.beat > 0.22 {
-			beat_color := pace_color(node.pace, 1, u8(150 + node.beat * 100))
-			rl.DrawLine3D(
-				lift_road_overlay(left, 0.075),
-				lift_road_overlay(right, 0.075),
-				beat_color,
-			)
-		}
 		rail_color := pace_color(node.pace, 0.78 + node.pace * 0.2, 245)
 		rl.DrawCylinderEx(left, next_left, 0.045 + node.pace * 0.025, 0.045, 5, rail_color)
 		rl.DrawCylinderEx(right, next_right, 0.045 + node.pace * 0.025, 0.045, 5, rail_color)
@@ -1758,27 +1742,6 @@ draw_ride :: proc(
 			}
 		}
 
-		if !is_rear_skirt && node.feature != 0 {
-			tl, tr := left, right
-			height: f32 = 5.6
-			feature_color := pace_color(node.pace, 0.88, 175)
-			if node.feature == ARCH {
-				height = 4.8
-				feature_color = pace_color(node.pace, 0.72, 145)
-			} else if node.feature == PORTAL || node.feature == RAMP {
-				height = 7.2
-				feature_color = pace_color(max(0.72, node.pace), 1, 220)
-			}
-			tl.y += height
-			tr.y += height
-			rl.DrawLine3D(left, tl, feature_color)
-			rl.DrawLine3D(right, tr, feature_color)
-			rl.DrawLine3D(tl, tr, feature_color)
-			if node.feature == PORTAL || node.feature == RAMP {
-				rl.DrawLine3D(left, tr, pace_color(node.pace, 1, 145))
-				rl.DrawLine3D(right, tl, pace_color(1 - node.pace, 0.9, 120))
-			}
-		}
 		if !is_rear_skirt && node.section == DROP && i % 7 == 0 {
 			tower_color := pace_color(node.pace, 0.38 + node.energy * 0.36, 180)
 			rl.DrawCube({left.x - 2.5, left.y - 3.5, center.z}, 1.2, 7, 1.2, tower_color)
