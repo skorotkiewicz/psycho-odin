@@ -1,74 +1,165 @@
-# PSYCHO
+<h1 align="center">PSYCHO</h1>
 
-An audio-reactive puzzle racer in Odin and raylib. It analyzes song-relative
-bass, mids, highs, robust dynamic range, adaptive transients, local beat density,
-and tempo confidence, then composes six-second musical movements: quiet climbs,
-bass-heavy drops, mid-driven slaloms, and treble tunnels. Each has distinct
-curves, banking, width, speed, traffic choreography, gates, portals, scenery,
-hazards, boosts, and powerups.
-Generated maps are cached by audio-content hash.
+<p align="center">
+  <strong>Your music becomes a psychedelic roller coaster.</strong><br>
+  An audio-reactive puzzle racer written in Odin with raylib.
+</p>
 
-Every tenth of a second, local song-relative energy and onset density become a
-`pace` value, with local tempo separating fast rhythmic passages from equally
-loud sustained ones. Pace controls grade, world distance, camera energy, trail
-length, and palette heat: calm music climbs slowly in cool colors, while
-busy/intense music crests into a hot, fast descent. The HUD profile previews the
-whole rollercoaster and marks the live song position. Its second view shows the
-entire cached route from above. The cache stores a true 3D centerline and
-heading/pitch, so road edges, traffic, banking, and the chase camera follow
-sweeping left/right turns instead of skewing a straight strip. Each song is one
-closed lap: the final cached position and tangent reconnect to the exact start,
-then playback finishes normally. Movement labels control turn style and visual
-character, never override the rhythm.
+<p align="center">
+  <img src="assets/screenshot-3.png" alt="PSYCHO racing down a fast, music-generated descent" width="900">
+</p>
+
+PSYCHO listens to a song before the ride begins, then composes a complete 3D
+track from its rhythm, spectrum, dynamics, and tempo. Quiet passages climb in
+cool colors. Dense, energetic sections dive, accelerate, and burn hot. Every
+song becomes one closed-loop course whose final curve returns to its beginning.
+
+The result is not a waveform with a car on top. It is a cached, explorable road:
+sweeping turns, hills, drops, banking, traffic, hazards, boosts, and a live map
+of the entire ride.
+
+## The ride
+
+- **Music becomes motion.** Bass, mids, highs, transients, beat density, tempo,
+  and song-relative energy influence the route, grade, speed, palette, camera,
+  and traffic.
+- **A real 3D course.** The road climbs, drops, banks, and turns through a cached
+  centerline instead of sliding a straight strip beneath the player.
+- **One song, one lap.** The whole route is generated up front, shown on the HUD,
+  and smoothly closed back onto its starting position and tangent.
+- **Arcade scoring.** Collect matching colors to grow a chain multiplier, dodge
+  hazards, repair shields, and catch gold boosts for six seconds of double-score
+  overdrive.
+- **Keyboard or mouse.** Switch naturally between horizontal mouse steering,
+  `A`/`D`, and the arrow keys. The cursor disappears during the ride.
+- **Persistent results.** Every completed run gets a result screen and one entry
+  in `.games/results.tsv`.
+
+<p align="center">
+  <img src="assets/screenshot-1.png" alt="A cool-colored climb with traffic and overdrive" width="49%">
+  <img src="assets/screenshot-2.png" alt="A purple music-generated bend" width="49%">
+</p>
+
+## Quick start
+
+You need an Odin toolchain with its raylib vendor package. With `odin` available
+on your `PATH`:
 
 ```sh
-odin build . -out:psycho
-./psycho music.wav
-./psycho --analyze music.wav # optional: fill the cache without opening a window
+odin build . -out:psycho -o:speed
+./psycho ~/Music/your-song.flac
 ```
 
-Raylib also accepts MP3, OGG, and FLAC. Cached maps live in `.psycho_cache/`;
-changing the audio or analyzer version creates a new map automatically.
+PSYCHO accepts the common formats supported by raylib, including WAV, MP3, OGG,
+and FLAC.
 
-Collect same-color traffic to grow the chain multiplier, dodge red hazards,
-and collect green shields. Three hull hits cause a crash and halve the score,
-but the ride continues. Gold cubes trigger six seconds of double-score
-overdrive and stronger visual effects.
-
-Controls: move the mouse horizontally, or use `A/D` or arrows, to steer. The
-most recently used device takes control, so switching is seamless. `Space`
-pauses, `F` toggles fullscreen, `P` toggles the psychedelic post-process,
-`,`/`.` changes visual strength, `B` toggles experimental binaural/spatial
-audio, `[`/`]` changes audio-effect strength, and `-`/`+` changes volume.
-The cursor is hidden during a live ride and shown while paused or on the result
-screen. Stereo headphones are required for the binaural effect.
-
-Startup defaults live in `config.toml`: mouse response, cursor hiding, music
-volume, visual FX/strength, and experimental audio FX/strength. Completed rides
-show score, best streak, and crashes, then append one timestamped record to
-`.games/results.tsv`. Press `R` from the result screen to start a fresh run.
-
-The audio layer is entertainment, not treatment. Research does not establish
-one best binaural frequency, and outcomes are mixed and protocol-dependent.
-ASMR relaxation/tingles also occur only for some listeners. Keep volume low;
-the WHO recommends staying below an average 80 dB and limiting exposure.
-The visual effect uses distortion and color separation rather than rapid
-full-screen flashes; disable it with `P` if you experience discomfort.
-
-- Binaural-beat systematic review: https://pubmed.ncbi.nlm.nih.gov/37205669/
-- ASMR physiology study: https://pmc.ncbi.nlm.nih.gov/articles/PMC6010208/
-- WHO safe listening: https://www.who.int/news-room/questions-and-answers/item/deafness-and-hearing-loss-safe-listening
-- W3C flash-safety guidance: https://www.w3.org/WAI/WCAG22/Understanding/three-flashes-or-below-threshold.html
-
-The level rules follow AudioSurf's documented high-level design: the song
-determines track shape, speed, mood, and traffic; quieter sections climb and
-slow down while intense sections dive and accelerate. PSYCHO uses its own
-filter-bank analyzer, continuous steering, chain scoring, hazards, and effects.
-
-- AudioSurf's official gameplay description: https://store.steampowered.com/app/12900/AudioSurf/
-- Dylan Fitterer interview on hills and traffic: https://arstechnica.com/gaming/2008/03/catching-waveforms-audiosurf-creator-dylan-speaks/
-- AudioSurf review documenting slow/uphill and fast/downhill mapping: https://www.gamespot.com/reviews/audiosurf-review/1900-6189185/
+The included `justfile` can drive a local toolchain stored at `./odin-dev`:
 
 ```sh
+just build
+./psycho ~/Music/your-song.mp3
+```
+
+The first run performs the deeper offline analysis. Generated maps are stored in
+`.psycho_cache/` by audio-content hash, so later runs start immediately.
+
+```sh
+./psycho --analyze ~/Music/your-song.ogg  # build the map without opening a window
+./psycho --self-test                     # verify analysis and road geometry
+```
+
+## Controls
+
+| Action | Control |
+| --- | --- |
+| Steer | Move the mouse horizontally, `A` / `D`, or arrow keys |
+| Pause / resume | `Space` |
+| Fullscreen | `F` |
+| Toggle psychedelic post-process | `P` |
+| Visual strength | `,` / `.` |
+| Toggle experimental headphone FX | `B` |
+| Headphone FX strength | `[` / `]` |
+| Music volume | `-` / `+` |
+| Ride again from results | `R` |
+
+The most recently used steering device takes control, so moving between mouse
+and keyboard is seamless. The cursor returns while paused and on the result
+screen.
+
+## How a song becomes a road
+
+```text
+audio file
+   │
+   ├─ spectrum + robust song-relative dynamics
+   ├─ adaptive transients + local beat density
+   └─ tempo confidence + musical activity
+          │
+          ▼
+     pace and movements
+          │
+          ├─ quiet       → climb, cool palette, slower travel
+          ├─ energetic   → descent, hot palette, faster travel
+          └─ spectrum    → climbs, drops, slaloms, tunnels
+          │
+          ▼
+   cached closed-loop 3D course
+```
+
+Analysis uses 100 ms slices, but longer look-around windows keep the course from
+reacting nervously to every sample. Broad musical movements shape the ride while
+local beats place traffic and scoring opportunities. Because the map exists
+before play begins, the HUD can show both its complete height profile and its
+full route from above.
+
+For the analyzer, track-generation rules, audio notes, safety references, and
+design background, see [MORE.md](MORE.md).
+
+## Configuration
+
+Startup preferences live in [config.toml](config.toml):
+
+- mouse response and cursor hiding;
+- music volume;
+- psychedelic post-processing and visual strength;
+- experimental stereo/headphone processing and its strength.
+
+Keyboard shortcuts still adjust the live session without rewriting the file.
+
+## A complete run
+
+<p align="center">
+  <img src="assets/screenshot-4.png" alt="PSYCHO ride-complete results screen" width="700">
+</p>
+
+The music stream does not loop. When the song ends, PSYCHO records the score,
+best streak, crashes, duration, song path, and completion time. Press `R` to ride
+the same course again.
+
+## Development
+
+```sh
+just check       # fast semantic and type check
+just vet         # additional Odin vetting
+just build-debug # symbols, no optimization
+just build       # optimized release build
 ./psycho --self-test
 ```
+
+The deterministic self-test exercises audio analysis, tempo response, climbs and
+drops, left/right curvature, loop closure, camera continuity, and near-camera
+road safety.
+
+## Inspiration and comfort
+
+PSYCHO is inspired by [AudioSurf](https://store.steampowered.com/app/12900/AudioSurf/)'s
+beautiful central idea: the song should determine the road, its mood, and its
+speed. Its analyzer, closed-loop course generation, continuous steering,
+scoring, and visual effects are original implementations.
+
+The headphone effect is experimental entertainment, not treatment. Keep volume
+comfortable, use stereo headphones only if you enjoy the effect, and press `P`
+to disable visual distortion whenever it feels unpleasant. Detailed references
+and safety notes are collected in [MORE.md](MORE.md).
+
+<p align="center"><strong>Choose a song. Learn its shape. Ride it home.</strong></p>
