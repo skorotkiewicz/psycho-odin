@@ -29,6 +29,58 @@ void main() {
     finalColor = vec4(color * (0.72 + 0.28*vignette) * scan, 1.0) * colDiffuse * fragColor;
 }`
 
+ride_camera :: proc(
+	nodes: []Track_Node,
+	current: int,
+	fraction, player_lane, steer_lean, shake_x, shake_y: f32,
+) -> rl.Camera3D {
+	next_i := min(current + 1, len(nodes) - 1)
+	base_x := nodes[current].curve_x + (nodes[next_i].curve_x - nodes[current].curve_x) * fraction
+	base_y := nodes[current].curve_y + (nodes[next_i].curve_y - nodes[current].curve_y) * fraction
+	base_z := nodes[current].curve_z + (nodes[next_i].curve_z - nodes[current].curve_z) * fraction
+	base_heading :=
+		nodes[current].heading + (nodes[next_i].heading - nodes[current].heading) * fraction
+	base_pitch := nodes[current].pitch + (nodes[next_i].pitch - nodes[current].pitch) * fraction
+	base_width := nodes[current].width + (nodes[next_i].width - nodes[current].width) * fraction
+	base_bank :=
+		road_bank(nodes, current) +
+		(road_bank(nodes, next_i) - road_bank(nodes, current)) * fraction
+	playhead := f32(current) + fraction
+	pace := pace_sample(nodes, playhead)
+	pace_curve := pace * pace * (3 - 2 * pace)
+	near_position := playhead + 8
+	far_position := playhead + 18 + pace * 8
+	preview_position := playhead + 10
+	near_look := road_center_sample(nodes, near_position, base_x, base_y, base_z, base_heading)
+	far_look := road_center_sample(nodes, far_position, base_x, base_y, base_z, base_heading)
+	future_heading := unwrap_angle_near(heading_sample(nodes, preview_position), base_heading)
+	future_pitch := pitch_sample(nodes, preview_position)
+	turn_preview := clamp(future_heading - base_heading, -0.7, 0.7)
+	pitch_preview := clamp(future_pitch - base_pitch, -0.45, 0.45)
+	camera_bank := clamp(turn_preview * 0.48 + steer_lean * 0.035, -0.29, 0.29)
+	player_x := lane_position(base_width, player_lane)
+	// A chase camera should lag the route. Fully aiming at the far centerline mathematically
+	// cancels the yaw/pitch that the player needs to see in order to feel the rollercoaster.
+	target_x := clamp(near_look.x * 0.10 + far_look.x * 0.18, -18, 18) + player_x * 0.06
+	target_y := clamp(near_look.y * 0.08 + far_look.y * 0.14, -12, 12)
+	// Using the full far Z here would dilute X/Y as fast nodes spread farther apart.
+	target_z := max(24, near_look.z * 0.10 + far_look.z * 0.18)
+	turn_fov := min(11, abs(turn_preview) * 24)
+	pitch_fov := min(8, abs(pitch_preview) * 24)
+	camera_ground_y := -(player_x * 0.72) * base_bank
+	return {
+		position = {
+			player_x * 0.72 + shake_x,
+			camera_ground_y + 2.55 + abs(turn_preview) * 0.8 + abs(pitch_preview) * 1.2 + shake_y,
+			CHASE_CAMERA_Z,
+		},
+		target = {target_x, target_y + 0.05, target_z},
+		up = {-camera_bank, 1, 0},
+		fovy = 66 + pace_curve * 18 + turn_fov + pitch_fov,
+		projection = .PERSPECTIVE,
+	}
+}
+
 draw_ride :: proc(
 	nodes: []Track_Node,
 	current: int,
@@ -50,35 +102,8 @@ draw_ride :: proc(
 	playhead := f32(current) + fraction
 	pace := pace_sample(nodes, playhead)
 	pace_curve := pace * pace * (3 - 2 * pace)
-	near_position := playhead + 8
-	far_position := playhead + 18 + pace * 8
-	preview_position := playhead + 10
-	near_look := road_center_sample(nodes, near_position, base_x, base_y, base_z, base_heading)
-	far_look := road_center_sample(nodes, far_position, base_x, base_y, base_z, base_heading)
-	future_heading := unwrap_angle_near(heading_sample(nodes, preview_position), base_heading)
-	future_pitch := pitch_sample(nodes, preview_position)
-	turn_preview := clamp(future_heading - base_heading, -0.7, 0.7)
-	pitch_preview := clamp(future_pitch - base_pitch, -0.45, 0.45)
-	camera_bank := clamp(turn_preview * 0.48 + steer_lean * 0.035, -0.29, 0.29)
 	player_x := lane_position(base_width, player_lane)
-	// A chase camera should lag the route. Fully aiming at the far centerline mathematically
-	// cancels the yaw/pitch that the player needs to see in order to feel the rollercoaster.
-	target_x := clamp(near_look.x * 0.10 + far_look.x * 0.18, -18, 18) + player_x * 0.06
-	target_y := clamp(near_look.y * 0.08 + far_look.y * 0.14, -12, 12)
-	turn_fov := min(11, abs(turn_preview) * 24)
-	pitch_fov := min(8, abs(pitch_preview) * 24)
-	camera_ground_y := -(player_x * 0.72) * base_bank
-	camera := rl.Camera3D {
-		position   = {
-			player_x * 0.72 + shake_x,
-			camera_ground_y + 2.55 + abs(turn_preview) * 0.8 + abs(pitch_preview) * 1.2 + shake_y,
-			CHASE_CAMERA_Z,
-		},
-		target     = {target_x, target_y + 0.05, max(24, far_look.z)},
-		up         = {-camera_bank, 1, 0},
-		fovy       = 66 + pace_curve * 18 + turn_fov + pitch_fov,
-		projection = .PERSPECTIVE,
-	}
+	camera := ride_camera(nodes, current, fraction, player_lane, steer_lean, shake_x, shake_y)
 	rl.BeginMode3D(camera)
 
 	closed_track := track_is_closed(nodes)

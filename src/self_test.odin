@@ -3,6 +3,49 @@ package main
 import "core:fmt"
 import "core:math"
 import "core:strings"
+import rl "vendor:raylib"
+
+CAMERA_TEST_WIDTH :: 1280
+CAMERA_TEST_HEIGHT :: 720
+
+// Project the actual chase camera and its next 0.4–2.0 seconds of fast road into screen space.
+fast_camera_preview_max_y :: proc(nodes: []Track_Node) -> (max_y: f32, sample_count: int) {
+	max_y = -1e9
+	fractions := [3]f32{0, 0.5, 0.95}
+	lookaheads := [6]f32{4, 8, 10, 12, 16, 20}
+	for i in 0 ..< len(nodes) - 1 {
+		for fraction in fractions {
+			playhead := f32(i) + fraction
+			if pace_sample(nodes, playhead) < 0.65 do continue
+			next_i := min(i + 1, len(nodes) - 1)
+			base_x := nodes[i].curve_x + (nodes[next_i].curve_x - nodes[i].curve_x) * fraction
+			base_y := nodes[i].curve_y + (nodes[next_i].curve_y - nodes[i].curve_y) * fraction
+			base_z := nodes[i].curve_z + (nodes[next_i].curve_z - nodes[i].curve_z) * fraction
+			base_heading :=
+				nodes[i].heading + (nodes[next_i].heading - nodes[i].heading) * fraction
+			camera := ride_camera(nodes, i, fraction, 0, 0, 0, 0)
+			for lookahead in lookaheads {
+				preview := road_center_sample(
+					nodes,
+					playhead + lookahead,
+					base_x,
+					base_y,
+					base_z,
+					base_heading,
+				)
+				screen := rl.GetWorldToScreenEx(
+					preview,
+					camera,
+					CAMERA_TEST_WIDTH,
+					CAMERA_TEST_HEIGHT,
+				)
+				max_y = max(max_y, screen.y)
+				sample_count += 1
+			}
+		}
+	}
+	return
+}
 
 self_test :: proc() {
 	rate := 8000
@@ -18,6 +61,17 @@ self_test :: proc() {
 	}
 	nodes := analyze_samples(raw_data(samples), len(samples), rate, 1)
 	defer delete(nodes)
+	fast_preview_y, fast_preview_samples := fast_camera_preview_max_y(nodes)
+	fmt.printfln(
+		"self-test: fast camera preview max y %.0f / %d",
+		fast_preview_y,
+		CAMERA_TEST_HEIGHT,
+	)
+	assert(fast_preview_samples > 0, "the camera regression fixture must contain fast sections")
+	assert(
+		fast_preview_y < f32(CAMERA_TEST_HEIGHT) * 2 / 3,
+		"fast-section lookahead must stay above the ship and foreground zone",
+	)
 	assert(len(nodes) == 240)
 	assert(nodes[10].bass >= 0 && nodes[10].bass <= 1)
 	assert(nodes[90].distance - nodes[89].distance > nodes[20].distance - nodes[19].distance)
