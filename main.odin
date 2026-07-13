@@ -9,7 +9,7 @@ import "core:strings"
 import rl "vendor:raylib"
 
 MAP_MAGIC :: u64(0x50535943484f3031) // PSYCHO01
-MAP_VERSION :: u32(7)
+MAP_VERSION :: u32(8)
 STEP :: f32(0.10)
 ROAD_STEP :: f32(5.5)
 
@@ -61,6 +61,7 @@ Track_Node :: struct {
 	pace, width:      f32,
 	curve_x, curve_y: f32,
 	curve_z, heading: f32,
+	pitch:            f32,
 	distance:         f32,
 	beat:             f32,
 	lane:             i32,
@@ -350,9 +351,9 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 		nodes[node_i].pace = clamp(pace, 0, 1)
 	}
 
-	// Third pass composes six-second musical movements instead of one generic wobble.
+	// Third pass composes six-second musical movements into a true 3D centerline.
 	SECTION_LENGTH :: 64
-	height, slope, center_x, center_z, heading, distance: f32
+	center_x, center_y, center_z, heading, pitch, distance: f32
 	section, previous_section := CLIMB, CLIMB
 	section_direction: f32 = 1
 	for node_i in 0 ..< count {
@@ -405,39 +406,50 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 			node.beat = 0.20 + min(0.38, node.high * 0.45)
 		}
 
-		// Pace owns grade and world distance: calm music climbs; intense or fast music dives.
-		// The inertial slope creates long rollercoaster arcs instead of a noisy waveform trace.
+		// Pace owns both world speed and road pitch: calm music climbs; intense music dives.
+		// Integrating an angle over world distance keeps fast drops steep instead of flattening
+		// them merely because consecutive samples are farther apart.
 		pace_curve := node.pace * node.pace * (3 - 2 * node.pace)
-		base_slope := 0.56 - pace_curve * 1.32 - node.onset * 0.10 - height * 0.00010
 		heading_target: f32
+		pitch_wave: f32
 		switch section {
 		case CLIMB:
 			heading_target =
-				f32(math.sin(f64(phase * math.PI))) * (0.24 + node.pace * 0.14) * section_direction
+				f32(math.sin(f64(phase * math.PI))) * (0.42 + node.pace * 0.18) * section_direction
+			pitch_wave = f32(math.sin(f64(phase * math.PI))) * 0.07
 			node.width = 3.9
 		case DROP:
 			heading_target =
-				f32(math.sin(f64(phase * math.PI))) * (0.34 + node.pace * 0.20) * section_direction
+				f32(math.sin(f64(phase * math.PI))) * (0.54 + node.pace * 0.20) * section_direction
+			pitch_wave = -f32(math.sin(f64(phase * math.PI))) * 0.10
 			node.width = 4.8
 		case SLALOM:
 			heading_target =
 				f32(math.sin(f64(phase * 4 * math.PI))) *
-				(0.36 + node.mid * 0.24) *
+				(0.58 + node.mid * 0.22) *
 				section_direction
+			pitch_wave = f32(math.sin(f64(phase * 2 * math.PI))) * 0.11
 			node.width = 4.25
 		case TUNNEL:
 			heading_target =
 				f32(math.sin(f64(phase * 6 * math.PI))) *
-				(0.30 + node.high * 0.22) *
+				(0.50 + node.high * 0.20) *
 				section_direction
+			pitch_wave = f32(math.sin(f64(phase * 4 * math.PI))) * 0.13
 			node.width = 4.35
 		}
-		slope = slope * 0.78 + base_slope * 0.22
-		height += slope
+		pitch_target := clamp(
+			0.22 - pace_curve * 0.56 - node.onset * 0.05 + pitch_wave - center_y * 0.000015,
+			-0.38,
+			0.30,
+		)
 		heading = heading * 0.80 + heading_target * 0.20
+		pitch = pitch * 0.78 + pitch_target * 0.22
 		step_distance := ROAD_STEP * (0.52 + pace_curve * 2.75)
-		center_x += f32(math.sin(f64(heading))) * step_distance
-		center_z += f32(math.cos(f64(heading))) * step_distance
+		horizontal_step := f32(math.cos(f64(pitch))) * step_distance
+		center_x += f32(math.sin(f64(heading))) * horizontal_step
+		center_y += f32(math.sin(f64(pitch))) * step_distance
+		center_z += f32(math.cos(f64(heading))) * horizontal_step
 		distance += step_distance
 
 		if node_i % SECTION_LENGTH == 0 do node.feature = PORTAL
@@ -445,8 +457,8 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 		if node.beat > 0.65 do node.feature = GATE
 		if node_i % SECTION_LENGTH == 0 && previous_section == CLIMB && section == DROP do node.feature = RAMP
 		if node_i > 0 && node.pace - nodes[node_i - 1].pace > 0.16 do node.feature = RAMP
-		node.curve_x, node.curve_y, node.curve_z = center_x, height, center_z
-		node.heading, node.distance = heading, distance
+		node.curve_x, node.curve_y, node.curve_z = center_x, center_y, center_z
+		node.heading, node.pitch, node.distance = heading, pitch, distance
 	}
 	return nodes
 }
@@ -684,32 +696,41 @@ self_test :: proc() {
 	}
 	min_x, max_x := nodes[0].curve_x, nodes[0].curve_x
 	min_y, max_y := nodes[0].curve_y, nodes[0].curve_y
-	min_heading, max_heading: f32
+	min_heading, max_heading, min_pitch, max_pitch: f32
 	for node in nodes {
 		min_x, max_x = min(min_x, node.curve_x), max(max_x, node.curve_x)
 		min_y, max_y = min(min_y, node.curve_y), max(max_y, node.curve_y)
 	}
 	for i in 1 ..< len(nodes) {
 		dx := nodes[i].curve_x - nodes[i - 1].curve_x
+		dy := nodes[i].curve_y - nodes[i - 1].curve_y
 		dz := nodes[i].curve_z - nodes[i - 1].curve_z
 		heading := f32(math.atan2(f64(dx), f64(max(0.001, dz))))
 		planar_step := f32(math.sqrt(f64(dx * dx + dz * dz)))
+		pitch := f32(math.atan2(f64(dy), f64(max(0.001, planar_step))))
+		spatial_step := f32(math.sqrt(f64(dx * dx + dy * dy + dz * dz)))
 		arc_step := nodes[i].distance - nodes[i - 1].distance
 		assert(dz > 0, "cached centerline must always move forward")
-		assert(abs(planar_step - arc_step) < 0.01, "cached distance must match centerline arc length")
+		assert(abs(spatial_step - arc_step) < 0.01, "cached distance must match 3D centerline arc length")
 		assert(abs(heading - nodes[i].heading) < 0.001, "cached heading must match centerline tangent")
+		assert(abs(pitch - nodes[i].pitch) < 0.001, "cached pitch must match centerline tangent")
 		min_heading = min(min_heading, heading)
 		max_heading = max(max_heading, heading)
+		min_pitch = min(min_pitch, pitch)
+		max_pitch = max(max_pitch, pitch)
 	}
 	fmt.printfln(
-		"self-test: visible heading %.1f° left / %.1f° right",
+		"self-test: centerline yaw %.1f° left / %.1f° right; pitch %.1f° up / %.1f° down",
 		f64(max_heading) * 180 / math.PI,
 		f64(min_heading) * 180 / math.PI,
+		f64(max_pitch) * 180 / math.PI,
+		f64(min_pitch) * 180 / math.PI,
 	)
 	assert(pickups > 0 && hazards > 0)
 	assert(card(sections) == 4)
 	assert(max_x - min_x > 16 && max_y - min_y > 18 && features > 4)
 	assert(max_heading > 0.24 && min_heading < -0.24, "road must make visible turns both ways")
+	assert(max_pitch > 0.10 && min_pitch < -0.10, "road must make visible climbs and drops")
 	probe_i := len(nodes) / 2
 	probe := nodes[probe_i]
 	probe_left := road_point(
@@ -788,8 +809,18 @@ self_test :: proc() {
 		loud_slope,
 		loud_speed,
 	)
+	quiet_run := f32(math.sqrt(f64(max(0.001, quiet_speed * quiet_speed - quiet_slope * quiet_slope))))
+	loud_run := f32(math.sqrt(f64(max(0.001, loud_speed * loud_speed - loud_slope * loud_slope))))
+	quiet_angle := f32(math.atan2(f64(quiet_slope), f64(quiet_run)))
+	loud_angle := f32(math.atan2(f64(loud_slope), f64(loud_run)))
+	fmt.printfln(
+		"self-test: actual road pitch %.1f° quiet / %.1f° loud",
+		f64(quiet_angle) * 180 / math.PI,
+		f64(loud_angle) * 180 / math.PI,
+	)
 	assert(quiet_slope > 0.12 && loud_slope < -0.12)
 	assert(loud_speed > quiet_speed * 1.8)
+	assert(quiet_angle > 0.10 && loud_angle < -0.10, "climbs and drops must remain visible at speed")
 
 	// Beat periodicity affects pace even when the average amplitude stays similar.
 	tempo_samples := make([]f32, rate * 28)
@@ -834,7 +865,11 @@ self_test :: proc() {
 	loaded, ok := load_map(path)
 	defer delete(loaded)
 	assert(ok && len(loaded) == len(nodes) && loaded[0].lane == nodes[0].lane)
-	assert(loaded[0].curve_z == nodes[0].curve_z && loaded[0].heading == nodes[0].heading)
+	assert(
+		loaded[0].curve_z == nodes[0].curve_z &&
+		loaded[0].heading == nodes[0].heading &&
+		loaded[0].pitch == nodes[0].pitch,
+	)
 	assert(loaded[len(loaded) - 1].curve_z == nodes[len(nodes) - 1].curve_z)
 	fmt.println("self-test: ok")
 }
@@ -867,6 +902,13 @@ road_point :: proc(
 	}
 }
 
+pitch_around :: proc(point: rl.Vector3, pivot_y, pitch: f32) -> rl.Vector3 {
+	c := f32(math.cos(f64(pitch)))
+	s := f32(math.sin(f64(pitch)))
+	dy := point.y - pivot_y
+	return {point.x, pivot_y + dy * c + point.z * s, point.z * c - dy * s}
+}
+
 draw_ride :: proc(
 	nodes: []Track_Node,
 	current: int,
@@ -877,6 +919,7 @@ draw_ride :: proc(
 	base_y := nodes[current].curve_y + (nodes[next_i].curve_y - nodes[current].curve_y) * fraction
 	base_z := nodes[current].curve_z + (nodes[next_i].curve_z - nodes[current].curve_z) * fraction
 	base_heading := nodes[current].heading + (nodes[next_i].heading - nodes[current].heading) * fraction
+	base_pitch := nodes[current].pitch + (nodes[next_i].pitch - nodes[current].pitch) * fraction
 	base_width := nodes[current].width + (nodes[next_i].width - nodes[current].width) * fraction
 	base_bank := road_bank(nodes, current) + (road_bank(nodes, next_i) - road_bank(nodes, current)) * fraction
 	shake_x := f32(math.sin(rl.GetTime() * 61)) * shake * 0.24
@@ -887,23 +930,29 @@ draw_ride :: proc(
 	far_i := min(current + 18 + int(pace * 8), len(nodes) - 1)
 	near_look := road_point(nodes, near_i, 0, base_x, base_y, base_z, base_heading)
 	far_look := road_point(nodes, far_i, 0, base_x, base_y, base_z, base_heading)
-	future_heading := nodes[min(current + 10, len(nodes) - 1)].heading
+	preview_i := min(current + 10, len(nodes) - 1)
+	future_heading := nodes[preview_i].heading
+	future_pitch := nodes[preview_i].pitch
 	turn_preview := clamp(future_heading - base_heading, -0.7, 0.7)
+	pitch_preview := clamp(future_pitch - base_pitch, -0.45, 0.45)
 	camera_bank := clamp(turn_preview * 0.48 + steer_lean * 0.035, -0.29, 0.29)
 	player_x := lane_position(base_width, player_lane)
-	target_x := near_look.x * 0.38 + far_look.x * 0.62 + player_x * 0.10
-	target_y := near_look.y * 0.24 + far_look.y * 0.36
+	// A chase camera should lag the route. Fully aiming at the far centerline mathematically
+	// cancels the yaw/pitch that the player needs to see in order to feel the rollercoaster.
+	target_x := clamp(near_look.x * 0.10 + far_look.x * 0.18, -18, 18) + player_x * 0.06
+	target_y := clamp(near_look.y * 0.08 + far_look.y * 0.14, -12, 12)
 	turn_fov := min(11, abs(turn_preview) * 24)
+	pitch_fov := min(8, abs(pitch_preview) * 24)
 	camera_ground_y := -(player_x * 0.72) * base_bank
 	camera := rl.Camera3D {
 		position   = {
 			player_x * 0.72 + shake_x,
-			camera_ground_y + 2.55 + abs(turn_preview) * 1.1 + shake_y,
+			camera_ground_y + 2.55 + abs(turn_preview) * 0.8 + abs(pitch_preview) * 1.2 + shake_y,
 			-6.35,
 		},
 		target     = {target_x, target_y + 0.05, max(24, far_look.z)},
 		up         = {-camera_bank, 1, 0},
-		fovy       = 66 + pace_curve * 18 + turn_fov,
+		fovy       = 66 + pace_curve * 18 + turn_fov + pitch_fov,
 		projection = .PERSPECTIVE,
 	}
 	rl.BeginMode3D(camera)
@@ -1071,57 +1120,83 @@ draw_ride :: proc(
 	for trail in 1 ..= trail_count {
 		alpha := u8(max(7, 125 / trail))
 		trail_color := pace_color(pace, 1, alpha)
+		trail_point := pitch_around(
+			{
+				ship_x + steer_lean * f32(trail) * 0.018,
+				ship_y,
+				-f32(trail) * (0.52 + pace * 0.28),
+			},
+			ship_y,
+			base_pitch,
+		)
 		rl.DrawSphere(
-			{ship_x + steer_lean * f32(trail) * 0.018, ship_y, -f32(trail) * (0.52 + pace * 0.28)},
+			trail_point,
 			0.29 / f32(trail) + 0.05,
 			trail_color,
 		)
 	}
 	wing_tilt := steer_lean * 0.24
+	body_back := pitch_around({ship_x, ship_y, -0.45}, ship_y, base_pitch)
+	body_front := pitch_around({ship_x, ship_y, 2.0}, ship_y, base_pitch)
 	rl.DrawCylinderEx(
-		{ship_x, ship_y, -0.45},
-		{ship_x, ship_y, 2.0},
+		body_back,
+		body_front,
 		0.56,
 		0.08,
 		8,
 		pace_color(pace, 0.46),
 	)
 	rl.DrawCylinderWiresEx(
-		{ship_x, ship_y, -0.45},
-		{ship_x, ship_y, 2.0},
+		body_back,
+		body_front,
 		0.56,
 		0.08,
 		8,
 		rl.Color{235, 245, 255, 230},
 	)
-	rl.DrawTriangle3D(
-		{ship_x, ship_y, 1.22},
+	ship_nose := pitch_around({ship_x, ship_y, 1.22}, ship_y, base_pitch)
+	ship_center := pitch_around({ship_x, ship_y, 0.02}, ship_y, base_pitch)
+	ship_left := pitch_around(
 		{ship_x - 1.48, ship_y - 0.20 + base_bank * 1.48 + wing_tilt, -0.34},
-		{ship_x, ship_y, 0.02},
+		ship_y,
+		base_pitch,
+	)
+	ship_right := pitch_around(
+		{ship_x + 1.48, ship_y - 0.20 - base_bank * 1.48 - wing_tilt, -0.34},
+		ship_y,
+		base_pitch,
+	)
+	rl.DrawTriangle3D(
+		ship_nose,
+		ship_left,
+		ship_center,
 		ship_color,
 	)
 	rl.DrawTriangle3D(
-		{ship_x, ship_y, 1.22},
-		{ship_x, ship_y, 0.02},
-		{ship_x + 1.48, ship_y - 0.20 - base_bank * 1.48 - wing_tilt, -0.34},
+		ship_nose,
+		ship_center,
+		ship_right,
 		ship_color,
 	)
 	for side in -1 ..= 1 {
 		if side == 0 do continue
 		pod_x := ship_x + f32(side) * 0.55
 		pod_y := ship_y - f32(side) * (base_bank * 0.55 + wing_tilt * 0.35)
+		pod_back := pitch_around({pod_x, pod_y, -0.46}, ship_y, base_pitch)
+		pod_front := pitch_around({pod_x, pod_y, 0.72}, ship_y, base_pitch)
 		rl.DrawCylinderEx(
-			{pod_x, pod_y, -0.46},
-			{pod_x, pod_y, 0.72},
+			pod_back,
+			pod_front,
 			0.24,
 			0.13,
 			7,
 			pace_color(pace, 0.72),
 		)
-		rl.DrawSphere({pod_x, pod_y, -0.45}, 0.22 + pace * 0.07, rl.WHITE)
+		rl.DrawSphere(pod_back, 0.22 + pace * 0.07, rl.WHITE)
 	}
-	rl.DrawSphere({ship_x, ship_y + 0.24, 0.30}, 0.34 + pulse * 0.10, ship_color)
-	rl.DrawSphereWires({ship_x, ship_y + 0.24, 0.30}, 0.37 + pulse * 0.10, 7, 7, rl.WHITE)
+	cockpit := pitch_around({ship_x, ship_y + 0.24, 0.30}, ship_y, base_pitch)
+	rl.DrawSphere(cockpit, 0.34 + pulse * 0.10, ship_color)
+	rl.DrawSphereWires(cockpit, 0.37 + pulse * 0.10, 7, 7, rl.WHITE)
 	rl.EndMode3D()
 }
 
