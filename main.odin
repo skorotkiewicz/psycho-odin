@@ -9,7 +9,7 @@ import "core:strings"
 import rl "vendor:raylib"
 
 MAP_MAGIC :: u64(0x50535943484f3031) // PSYCHO01
-MAP_VERSION :: u32(5)
+MAP_VERSION :: u32(6)
 STEP :: f32(0.10)
 ROAD_STEP :: f32(5.5)
 LANE_WIDTH :: f32(2.6)
@@ -58,6 +58,7 @@ void main() {
 Track_Node :: struct {
 	bass, mid, high:  f32,
 	energy, onset:    f32,
+	tempo, activity:  f32,
 	pace, width:      f32,
 	curve_x, curve_y: f32,
 	distance:         f32,
@@ -164,11 +165,11 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 	low, body: f32
 	low_alpha := f32(1 - math.exp(-2 * math.PI * 180 / f64(sample_rate)))
 	body_alpha := f32(1 - math.exp(-2 * math.PI * 2400 / f64(sample_rate)))
-	mean_energy: f32
+	mean_energy, max_energy: f32
 	song_seed: u32 = 2166136261
 
-	// First pass: inexpensive three-band filter bank. It is plenty for level generation;
-	// ponytail: replace with an FFT only if profiling/playtests show missing musical detail.
+	// First pass: three broad perceptual bands. The later offline passes combine these with
+	// song-relative dynamics and rhythm, which is more useful to the road than raw loudness.
 	for node_i in 0 ..< count {
 		start := node_i * frames_per_node
 		finish := min(frame_count, start + frames_per_node)
@@ -190,55 +191,163 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 		mid := f32(math.sqrt(mid_sum / n))
 		high := f32(math.sqrt(high_sum / n))
 		nodes[node_i].bass, nodes[node_i].mid, nodes[node_i].high = bass, mid, high
-		mean_energy += bass * 0.9 + mid * 0.65 + high * 0.35
+		raw_energy := bass * 0.9 + mid * 0.65 + high * 0.35
+		nodes[node_i].energy = raw_energy
+		mean_energy += raw_energy
+		max_energy = max(max_energy, raw_energy)
 		song_seed = (song_seed ~ u32((bass * 997 + mid * 619 + high * 389) * 1_000_000)) * 16777619
 	}
 	mean_energy = max(mean_energy / f32(count), 0.0001)
 
-	// Second pass normalizes dynamics against the whole song so quiet and loud masters play alike.
+	// A small histogram gives robust quiet/loud anchors without sorting a copy of the song.
+	// This deliberately amplifies useful dynamics in heavily compressed masters.
+	energy_histogram: [256]int
+	if max_energy > 0 {
+		for node in nodes {
+			bucket := clamp(int(node.energy / max_energy * 255), 0, 255)
+			energy_histogram[bucket] += 1
+		}
+	}
+	floor_bucket, ceiling_bucket: int
+	seen := 0
+	floor_found := false
+	for bucket in 0 ..< len(energy_histogram) {
+		seen += energy_histogram[bucket]
+		if !floor_found && seen >= max(1, count * 12 / 100) {
+			floor_bucket = bucket
+			floor_found = true
+		}
+		if seen >= max(1, count * 92 / 100) {
+			ceiling_bucket = bucket
+			break
+		}
+	}
+	energy_floor := max_energy * f32(floor_bucket) / 255
+	energy_ceiling := max_energy * f32(ceiling_bucket) / 255
+	if energy_ceiling - energy_floor < mean_energy * 0.12 {
+		energy_floor = max(0, mean_energy * 0.82)
+		energy_ceiling = mean_energy * 1.18
+	}
+	energy_range := max(energy_ceiling - energy_floor, 0.0001)
+
+	// Second pass normalizes every song against its own dynamic range, so a quiet master and
+	// a loud master both produce readable climbs and drops.
 	for node_i in 0 ..< count {
 		node := &nodes[node_i]
-		raw_energy := node.bass * 0.9 + node.mid * 0.65 + node.high * 0.35
-		intensity := clamp(raw_energy / (mean_energy * 2.15), 0, 1)
-		band_scale := 1 / (mean_energy * 2.4)
+		intensity := clamp((node.energy - energy_floor) / energy_range, 0, 1)
+		intensity = intensity * intensity * (3 - 2 * intensity)
+		band_scale := 1 / max(energy_ceiling * 1.35, mean_energy * 1.8)
 		node.bass = clamp(node.bass * band_scale, 0, 1)
 		node.mid = clamp(node.mid * band_scale, 0, 1)
 		node.high = clamp(node.high * band_scale, 0, 1)
 		node.energy = intensity
 	}
 
-	// Onsets provide the rhythmic half of pace; loudness alone cannot distinguish busy from sustained music.
-	flux_average, prior_bass, prior_mid: f32
-	last_beat := -10
+	// Adaptive spectral flux finds changes rather than merely loud samples. A local threshold
+	// makes subtle hi-hats in quiet songs and hard snares in loud songs both useful.
+	raw_onset := make([]f32, count)
+	defer delete(raw_onset)
+	prior_bass, prior_mid, prior_high, prior_energy: f32
 	for node_i in 0 ..< count {
 		node := &nodes[node_i]
 		flux :=
 			max(0, node.bass - prior_bass) * 0.75 +
 			max(0, node.mid - prior_mid) * 0.4 +
-			max(0, node.high - nodes[max(0, node_i - 1)].high) * 0.2
-		flux_average = flux_average * 0.9 + flux * 0.1
-		node.onset = clamp(flux * 2.8, 0, 1)
-		if node_i > 8 && node_i - last_beat > 2 && flux > max(0.045, flux_average * 1.65) {
-			node.beat = clamp(flux * 2.8, 0.3, 1)
-			node.kind = PICKUP
-			last_beat = node_i
-		}
-		prior_bass, prior_mid = node.bass, node.mid
+			max(0, node.high - prior_high) * 0.24 +
+			max(0, node.energy - prior_energy) * 0.18
+		raw_onset[node_i] = flux
+		prior_bass, prior_mid, prior_high, prior_energy =
+			node.bass, node.mid, node.high, node.energy
 	}
 
-	// Offline look-around makes a crest arrive with a drop instead of lagging behind it.
 	for node_i in 0 ..< count {
-		energy, activity, weight_sum: f32
-		for look := max(0, node_i - 3); look <= min(count - 1, node_i + 3); look += 1 {
-			weight := f32(4 - abs(look - node_i))
-			energy += nodes[look].energy * weight
-			activity += nodes[look].onset * weight
-			weight_sum += weight
+		local_flux: f32
+		local_count: int
+		for look := max(0, node_i - 12); look <= min(count - 1, node_i + 12); look += 1 {
+			if abs(look - node_i) > 1 {
+				local_flux += raw_onset[look]
+				local_count += 1
+			}
 		}
-		energy /= weight_sum
-		activity = clamp(activity / weight_sum * 3.2, 0, 1)
+		local_flux /= f32(max(1, local_count))
+		surprise := raw_onset[node_i] / max(0.012, local_flux * 1.35)
+		nodes[node_i].onset = clamp((surprise - 0.72) / 1.7, 0, 1)
+	}
+
+	last_beat := -10
+	for node_i in 0 ..< count {
+		previous_flux := nodes[max(0, node_i - 1)].onset
+		next_flux := nodes[min(count - 1, node_i + 1)].onset
+		if node_i > 3 && node_i - last_beat > 2 &&
+		   nodes[node_i].onset >= 0.24 && nodes[node_i].onset >= previous_flux &&
+		   nodes[node_i].onset >= next_flux {
+			nodes[node_i].beat = nodes[node_i].onset
+			nodes[node_i].kind = PICKUP
+			last_beat = node_i
+		}
+	}
+
+	// Local autocorrelation distinguishes a dense fast beat from an equally loud sustained
+	// passage. At 100 ms resolution, lags 3..10 cover roughly 200..60 BPM.
+	for node_i in 0 ..< count {
+		window_start := max(0, node_i - 48)
+		window_end := min(count - 1, node_i + 48)
+		best_lag := 10
+		best_score: f32
+		for lag in 3 ..= 10 {
+			correlation, left_power, right_power: f32
+			for look := window_start + lag; look <= window_end; look += 1 {
+				left := nodes[look].onset
+				right := nodes[look - lag].onset
+				correlation += left * right
+				left_power += left * left
+				right_power += right * right
+			}
+			score := correlation / f32(math.sqrt(f64(max(0.0001, left_power * right_power))))
+			// Prefer the faster fundamental slightly when a half-time harmonic scores equally.
+			score *= 1 + f32(10 - lag) * 0.012
+			if score > best_score {
+				best_score = score
+				best_lag = lag
+			}
+		}
+		activity: f32
+		for look := max(0, node_i - 10); look <= min(count - 1, node_i + 10); look += 1 {
+			activity += nodes[look].onset
+		}
+		activity /= f32(min(count - 1, node_i + 10) - max(0, node_i - 10) + 1)
+		nodes[node_i].activity = clamp(activity * 2.8, 0, 1)
+		bpm_normalized := clamp((600 / f32(best_lag) - 60) / 140, 0, 1)
+		confidence := clamp((best_score - 0.16) / 0.55, 0, 1)
+		nodes[node_i].tempo =
+			clamp(bpm_normalized * confidence + nodes[node_i].activity * 0.16, 0, 1)
+	}
+
+	// Offline look-around lets the road crest just before a musical drop instead of lagging it.
+	raw_pace := make([]f32, count)
+	defer delete(raw_pace)
+	for node_i in 0 ..< count {
 		texture := clamp(nodes[node_i].mid + nodes[node_i].high, 0, 1)
-		nodes[node_i].pace = clamp(energy * 0.72 + activity * 0.22 + texture * 0.06, 0, 1)
+		raw_pace[node_i] = clamp(
+			nodes[node_i].energy * 0.58 +
+			nodes[node_i].activity * 0.18 +
+			nodes[node_i].tempo * 0.18 +
+			texture * 0.06,
+			0,
+			1,
+		)
+	}
+	for node_i in 0 ..< count {
+		pace_sum, weight_sum, coming_peak: f32
+		for look := max(0, node_i - 7); look <= min(count - 1, node_i + 11); look += 1 {
+			delta := abs(look - node_i)
+			weight := 1 / f32(1 + delta)
+			pace_sum += raw_pace[look] * weight
+			weight_sum += weight
+			if look >= node_i do coming_peak = max(coming_peak, raw_pace[look])
+		}
+		pace := pace_sum / weight_sum * 0.82 + coming_peak * 0.18
+		nodes[node_i].pace = clamp(pace, 0, 1)
 	}
 
 	// Third pass composes six-second musical movements instead of one generic wobble.
@@ -290,8 +399,10 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 			node.beat = 0.20 + min(0.38, node.high * 0.45)
 		}
 
-		// Pace alone owns grade and distance: calm music climbs slowly, busy music dives quickly.
-		base_slope := (0.46 - node.pace) * 0.78 - node.onset * 0.06 - height * 0.00018
+		// Pace owns grade and world distance: calm music climbs; intense or fast music dives.
+		// The inertial slope creates long rollercoaster arcs instead of a noisy waveform trace.
+		pace_curve := node.pace * node.pace * (3 - 2 * node.pace)
+		base_slope := 0.56 - pace_curve * 1.32 - node.onset * 0.10 - height * 0.00010
 		turn_target: f32
 		switch section {
 		case CLIMB:
@@ -313,7 +424,7 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 				section_direction
 			node.width = 4.35
 		}
-		slope = slope * 0.55 + base_slope * 0.45
+		slope = slope * 0.78 + base_slope * 0.22
 		height += slope
 		turn = turn * 0.70 + turn_target * 0.30 - curve * 0.0012
 		curve += turn
@@ -321,7 +432,7 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 			curve = clamp(curve, -30, 30)
 			turn *= -0.55
 		}
-		distance += ROAD_STEP * (0.38 + node.pace * 2.0)
+		distance += ROAD_STEP * (0.52 + pace_curve * 2.75)
 
 		if node_i % SECTION_LENGTH == 0 do node.feature = PORTAL
 		if section == TUNNEL && node_i % 4 == 0 do node.feature = ARCH
@@ -348,6 +459,98 @@ steer_input :: proc(left, right: bool) -> f32 {
 	if left do direction += 1
 	if right do direction -= 1
 	return direction
+}
+
+mouse_lane_target :: proc(mouse_x, screen_width: i32) -> f32 {
+	if screen_width <= 1 do return 0
+	// The outer 8% on either side is already full lock, keeping steering reachable in a window.
+	center := f32(screen_width) * 0.5
+	half_control_width := f32(screen_width) * 0.42
+	return clamp((center - f32(mouse_x)) / half_control_width, -1, 1)
+}
+
+smooth_mouse_lane :: proc(current, target, dt: f32) -> f32 {
+	response := 1 - f32(math.exp(f64(-18 * max(0, dt))))
+	return clamp(current + (target - current) * response, -1, 1)
+}
+
+pace_color :: proc(pace, value: f32, alpha: u8 = 255) -> rl.Color {
+	// Cool cyan climbs travel through violet into hot gold/red descents.
+	hue := 205 + clamp(pace, 0, 1) * 177
+	color := rl.ColorFromHSV(hue, 0.62 + pace * 0.34, clamp(value, 0, 1))
+	color.a = alpha
+	return color
+}
+
+course_map_point :: proc(
+	nodes: []Track_Node,
+	node_i: int,
+	left, top, plot_width, plot_height, min_height, max_height: f32,
+) -> rl.Vector2 {
+	node := nodes[clamp(node_i, 0, len(nodes) - 1)]
+	height_range := max(1, max_height - min_height)
+	return {
+		left + f32(node_i) / f32(len(nodes) - 1) * plot_width,
+		top + (max_height - node.curve_y) / height_range * plot_height,
+	}
+}
+
+draw_course_map :: proc(nodes: []Track_Node, current: int, x, y, width, height: i32) {
+	if len(nodes) < 2 || width < 80 || height < 50 do return
+	rl.DrawRectangle(x, y, width, height, rl.Color{2, 5, 17, 218})
+	rl.DrawRectangleLines(x, y, width, height, rl.Color{80, 135, 190, 130})
+	rl.DrawText("RIDE PROFILE", x + 11, y + 8, 13, rl.Color{160, 205, 235, 230})
+
+	left, top := f32(x + 11), f32(y + 28)
+	plot_width, plot_height := f32(width - 22), f32(height - 39)
+	min_height, max_height := nodes[0].curve_y, nodes[0].curve_y
+	for node in nodes {
+		min_height = min(min_height, node.curve_y)
+		max_height = max(max_height, node.curve_y)
+	}
+	samples_on_map := min(len(nodes), max(2, int(plot_width)))
+	previous_point := course_map_point(
+		nodes,
+		0,
+		left,
+		top,
+		plot_width,
+		plot_height,
+		min_height,
+		max_height,
+	)
+	for sample in 1 ..< samples_on_map {
+		node_i := sample * (len(nodes) - 1) / (samples_on_map - 1)
+		point := course_map_point(
+			nodes,
+			node_i,
+			left,
+			top,
+			plot_width,
+			plot_height,
+			min_height,
+			max_height,
+		)
+		alpha: u8 = 215
+		if node_i < current do alpha = 105
+		color := pace_color(nodes[node_i].pace, 0.72 + nodes[node_i].pace * 0.25, alpha)
+		rl.DrawLineEx(previous_point, point, 2.0, color)
+		previous_point = point
+	}
+
+	marker := course_map_point(
+		nodes,
+		current,
+		left,
+		top,
+		plot_width,
+		plot_height,
+		min_height,
+		max_height,
+	)
+	rl.DrawCircleV(marker, 5.5, rl.Color{2, 5, 17, 255})
+	rl.DrawCircleLines(i32(marker.x), i32(marker.y), 6, rl.WHITE)
+	rl.DrawCircleV(marker, 2.2, pace_color(nodes[current].pace, 1))
 }
 
 self_test :: proc() {
@@ -385,14 +588,19 @@ self_test :: proc() {
 	assert(card(sections) == 4)
 	assert(max_x - min_x > 16 && max_y - min_y > 18 && features > 4)
 	assert(steer_input(true, false) > 0, "A/left must move toward screen-left for a +Z camera")
+	assert(mouse_lane_target(0, 1000) > 0.99)
+	assert(abs(mouse_lane_target(500, 1000)) < 0.001)
+	assert(mouse_lane_target(1000, 1000) < -0.99)
+	mouse_step := smooth_mouse_lane(0, 1, 1.0 / 60.0)
+	assert(mouse_step > 0 && mouse_step < 1)
 
-	// One-second dynamics must shape the road even inside the same visual movement.
-	rhythm_samples := make([]f32, rate * 12)
+	// Multi-second musical dynamics must produce opposite grades and visibly different speeds.
+	rhythm_samples := make([]f32, rate * 24)
 	defer delete(rhythm_samples)
 	for i in 0 ..< len(rhythm_samples) {
 		t := f64(i) / f64(rate)
 		amplitude: f32 = 0.025
-		if (i / rate) % 2 == 1 do amplitude = 0.30
+		if (i / (rate * 6)) % 2 == 1 do amplitude = 0.30
 		rhythm_samples[i] = f32(math.sin(2 * math.PI * 100 * t)) * amplitude
 	}
 	rhythm := analyze_samples(raw_data(rhythm_samples), len(rhythm_samples), rate, 1)
@@ -400,10 +608,10 @@ self_test :: proc() {
 	quiet_slope, loud_slope, quiet_speed, loud_speed: f32
 	quiet_count, loud_count: int
 	for i in 1 ..< len(rhythm) {
-		if i % 10 < 4 do continue
+		if i % 60 < 20 || i % 60 > 56 do continue
 		slope := rhythm[i].curve_y - rhythm[i - 1].curve_y
 		speed := rhythm[i].distance - rhythm[i - 1].distance
-		if (i / 10) % 2 == 0 {
+		if (i / 60) % 2 == 0 {
 			quiet_slope += slope
 			quiet_speed += speed
 			quiet_count += 1
@@ -415,8 +623,53 @@ self_test :: proc() {
 	}
 	quiet_slope, loud_slope = quiet_slope / f32(quiet_count), loud_slope / f32(loud_count)
 	quiet_speed, loud_speed = quiet_speed / f32(quiet_count), loud_speed / f32(loud_count)
-	assert(quiet_slope > 0.08 && loud_slope < -0.08)
+	fmt.printfln(
+		"self-test: quiet grade %.3f speed %.2f | loud grade %.3f speed %.2f",
+		quiet_slope,
+		quiet_speed,
+		loud_slope,
+		loud_speed,
+	)
+	assert(quiet_slope > 0.12 && loud_slope < -0.12)
 	assert(loud_speed > quiet_speed * 1.8)
+
+	// Beat periodicity affects pace even when the average amplitude stays similar.
+	tempo_samples := make([]f32, rate * 28)
+	defer delete(tempo_samples)
+	for i in 0 ..< len(tempo_samples) {
+		t := f64(i) / f64(rate)
+		period := rate * 4 / 5 // 75 BPM
+		if i >= rate * 14 do period = rate * 2 / 5 // 150 BPM
+		pulse_length := rate / 18
+		phase := i % period
+		envelope: f32
+		if phase < pulse_length do envelope = 1 - f32(phase) / f32(pulse_length)
+		tempo_samples[i] =
+			f32(math.sin(2 * math.PI * 105 * t)) * (0.035 + envelope * 0.31) +
+			f32(math.sin(2 * math.PI * 1450 * t)) * envelope * 0.06
+	}
+	tempo_nodes := analyze_samples(raw_data(tempo_samples), len(tempo_samples), rate, 1)
+	defer delete(tempo_nodes)
+	slow_tempo, fast_tempo, slow_pace, fast_pace: f32
+	metric_count: int
+	for i in 40 ..< 105 {
+		slow_tempo += tempo_nodes[i].tempo
+		slow_pace += tempo_nodes[i].pace
+		fast_tempo += tempo_nodes[i + 140].tempo
+		fast_pace += tempo_nodes[i + 140].pace
+		metric_count += 1
+	}
+	slow_tempo, fast_tempo = slow_tempo / f32(metric_count), fast_tempo / f32(metric_count)
+	slow_pace, fast_pace = slow_pace / f32(metric_count), fast_pace / f32(metric_count)
+	fmt.printfln(
+		"self-test: slow beat %.2f pace %.2f | fast beat %.2f pace %.2f",
+		slow_tempo,
+		slow_pace,
+		fast_tempo,
+		fast_pace,
+	)
+	assert(fast_tempo > slow_tempo + 0.12)
+	assert(fast_pace > slow_pace + 0.05)
 
 	path := ".psycho_cache/self-test.map"
 	assert(save_map(path, nodes))
@@ -441,7 +694,11 @@ road_point :: proc(
 	}
 }
 
-draw_ride :: proc(nodes: []Track_Node, current: int, fraction, player_lane, pulse, shake: f32) {
+draw_ride :: proc(
+	nodes: []Track_Node,
+	current: int,
+	fraction, player_lane, steer_lean, pulse, shake: f32,
+) {
 	next_i := min(current + 1, len(nodes) - 1)
 	base_x := nodes[current].curve_x + (nodes[next_i].curve_x - nodes[current].curve_x) * fraction
 	base_y := nodes[current].curve_y + (nodes[next_i].curve_y - nodes[current].curve_y) * fraction
@@ -449,15 +706,18 @@ draw_ride :: proc(nodes: []Track_Node, current: int, fraction, player_lane, puls
 		nodes[current].distance + (nodes[next_i].distance - nodes[current].distance) * fraction
 	shake_x := f32(math.sin(rl.GetTime() * 61)) * shake * 0.24
 	shake_y := f32(math.sin(rl.GetTime() * 47)) * shake * 0.18
-	look := road_point(nodes, min(current + 12, len(nodes) - 1), 0, base_x, base_y, base_distance)
+	pace := nodes[current].pace
+	pace_curve := pace * pace * (3 - 2 * pace)
+	look_ahead := 10 + int(pace * 8)
+	look := road_point(nodes, min(current + look_ahead, len(nodes) - 1), 0, base_x, base_y, base_distance)
 	previous := nodes[max(0, current - 1)]
 	next := nodes[min(len(nodes) - 1, current + 1)]
-	camera_bank := clamp((next.curve_x - previous.curve_x) * 0.09, -0.22, 0.22)
+	camera_bank := clamp((next.curve_x - previous.curve_x) * 0.11 + steer_lean * 0.035, -0.26, 0.26)
 	camera := rl.Camera3D {
-		position   = {player_lane * LANE_WIDTH * 0.3 + shake_x, 3.0 + shake_y, -8.8},
-		target     = {look.x * 0.20, look.y * 0.32 + 0.15, max(28, look.z)},
+		position   = {player_lane * LANE_WIDTH * 0.28 + shake_x, 2.35 + shake_y, -6.35},
+		target     = {look.x * 0.26, look.y * 0.52 + 0.05, max(24, look.z)},
 		up         = {-camera_bank, 1, 0},
-		fovy       = 70 + nodes[current].pace * 14,
+		fovy       = 66 + pace_curve * 18,
 		projection = .PERSPECTIVE,
 	}
 	rl.BeginMode3D(camera)
@@ -469,24 +729,48 @@ draw_ride :: proc(nodes: []Track_Node, current: int, fraction, player_lane, puls
 		next_left := road_point(nodes, i + 1, -nodes[i + 1].width, base_x, base_y, base_distance)
 		next_right := road_point(nodes, i + 1, nodes[i + 1].width, base_x, base_y, base_distance)
 		center := road_point(nodes, i, 0, base_x, base_y, base_distance)
-		section_hues := [4]f32{205, 8, 292, 155}
-		hue := section_hues[clamp(node.section, 0, 3)] + f32((i * 2) % 55)
-		color := rl.ColorFromHSV(hue + 190, 0.74, 0.25 + node.mid * 0.62)
-		color.a = 205
-		rl.DrawTriangle3D(left, next_left, right, color)
-		rl.DrawTriangle3D(right, next_left, next_right, color)
-
-		if i % 2 == 0 {
-			rl.DrawLine3D(left, right, rl.Color{90, 150, 240, 155})
+		surface_value := clamp(
+			0.11 + node.pace * 0.24 + node.energy * 0.22 + node.mid * 0.18,
+			0,
+			0.82,
+		)
+		// Shade each lane independently: this makes steering and traffic readable at speed.
+		for lane_i in 0 ..< 3 {
+			near_left_offset := -node.width + f32(lane_i) * node.width * 2 / 3
+			near_right_offset := -node.width + f32(lane_i + 1) * node.width * 2 / 3
+			far_left_offset :=
+				-nodes[i + 1].width + f32(lane_i) * nodes[i + 1].width * 2 / 3
+			far_right_offset :=
+				-nodes[i + 1].width + f32(lane_i + 1) * nodes[i + 1].width * 2 / 3
+			lane_left := road_point(nodes, i, near_left_offset, base_x, base_y, base_distance)
+			lane_right := road_point(nodes, i, near_right_offset, base_x, base_y, base_distance)
+			lane_next_left := road_point(nodes, i + 1, far_left_offset, base_x, base_y, base_distance)
+			lane_next_right := road_point(nodes, i + 1, far_right_offset, base_x, base_y, base_distance)
+			lane_lift: f32
+			if lane_i == 1 do lane_lift = 0.045
+			lane_color := pace_color(node.pace, surface_value + lane_lift, 225)
+			rl.DrawTriangle3D(lane_left, lane_next_left, lane_right, lane_color)
+			rl.DrawTriangle3D(lane_right, lane_next_left, lane_next_right, lane_color)
 		}
-		rl.DrawLine3D(left, next_left, rl.Color{70, 210, 255, 230})
-		rl.DrawLine3D(right, next_right, rl.Color{255, 70, 205, 230})
-		for lane_mark in -1 ..= 1 {
-			if lane_mark == 0 do continue
-			mark := f32(lane_mark) * LANE_WIDTH * 0.5
-			p0 := road_point(nodes, i, mark, base_x, base_y, base_distance)
-			p1 := road_point(nodes, i + 1, mark, base_x, base_y, base_distance)
-			rl.DrawLine3D(p0, p1, rl.Color{100, 110, 165, 110})
+
+		grid_color := pace_color(node.pace, 0.58 + node.pace * 0.32, 105)
+		if i % 2 == 0 do rl.DrawLine3D(left, right, grid_color)
+		if node.beat > 0.22 {
+			beat_color := pace_color(node.pace, 1, u8(150 + node.beat * 100))
+			rl.DrawLine3D(left, right, beat_color)
+		}
+		rail_color := pace_color(node.pace, 0.78 + node.pace * 0.2, 245)
+		rl.DrawCylinderEx(left, next_left, 0.045 + node.pace * 0.025, 0.045, 5, rail_color)
+		rl.DrawCylinderEx(right, next_right, 0.045 + node.pace * 0.025, 0.045, 5, rail_color)
+		if i % 2 == 0 {
+			for lane_mark in -1 ..= 1 {
+				if lane_mark == 0 do continue
+				mark := f32(lane_mark) * node.width / 3
+				next_mark := f32(lane_mark) * nodes[i + 1].width / 3
+				p0 := road_point(nodes, i, mark, base_x, base_y, base_distance)
+				p1 := road_point(nodes, i + 1, next_mark, base_x, base_y, base_distance)
+				rl.DrawLine3D(p0, p1, rl.Color{205, 225, 255, 145})
+			}
 		}
 
 		if node.kind != 0 && i > current + 1 {
@@ -523,13 +807,13 @@ draw_ride :: proc(nodes: []Track_Node, current: int, fraction, player_lane, puls
 		if node.feature != 0 {
 			tl, tr := left, right
 			height: f32 = 5.6
-			feature_color := rl.Color{220, 120, 255, 155}
+			feature_color := pace_color(node.pace, 0.88, 175)
 			if node.feature == ARCH {
 				height = 4.8
-				feature_color = rl.Color{55, 255, 190, 125}
+				feature_color = pace_color(node.pace, 0.72, 145)
 			} else if node.feature == PORTAL || node.feature == RAMP {
 				height = 7.2
-				feature_color = rl.Color{255, 210, 55, 200}
+				feature_color = pace_color(max(0.72, node.pace), 1, 220)
 			}
 			tl.y += height
 			tr.y += height
@@ -537,57 +821,89 @@ draw_ride :: proc(nodes: []Track_Node, current: int, fraction, player_lane, puls
 			rl.DrawLine3D(right, tr, feature_color)
 			rl.DrawLine3D(tl, tr, feature_color)
 			if node.feature == PORTAL || node.feature == RAMP {
-				rl.DrawLine3D(left, tr, rl.Color{255, 80, 210, 120})
-				rl.DrawLine3D(right, tl, rl.Color{70, 220, 255, 120})
+				rl.DrawLine3D(left, tr, pace_color(node.pace, 1, 145))
+				rl.DrawLine3D(right, tl, pace_color(1 - node.pace, 0.9, 120))
 			}
 		}
 		if node.section == DROP && i % 7 == 0 {
+			tower_color := pace_color(node.pace, 0.38 + node.energy * 0.36, 180)
 			rl.DrawCube(
 				{left.x - 2.5, left.y - 3.5, center.z},
 				1.2,
 				7,
 				1.2,
-				rl.Color{120, 25, 35, 150},
+				tower_color,
 			)
 			rl.DrawCube(
 				{right.x + 2.5, right.y - 3.5, center.z},
 				1.2,
 				7,
 				1.2,
-				rl.Color{120, 25, 35, 150},
+				tower_color,
+			)
+		}
+		if i % 6 == 0 {
+			panel_height := 1.5 + node.energy * 3.5 + node.pace * 1.8
+			panel_color := pace_color(node.pace, 0.34 + node.pace * 0.35, 135)
+			rl.DrawCube(
+				{left.x - 1.25, left.y + panel_height * 0.38, center.z},
+				0.22,
+				panel_height,
+				1.7,
+				panel_color,
+			)
+			rl.DrawCube(
+				{right.x + 1.25, right.y + panel_height * 0.38, center.z},
+				0.22,
+				panel_height,
+				1.7,
+				panel_color,
 			)
 		}
 		if i % 5 == 0 {
 			star_x := f32(((i * 73) % 31) - 15) * 1.6
 			star_y := f32(((i * 47) % 17) - 3) * 1.2
-			rl.DrawSphere({star_x, star_y, center.z}, 0.035 + node.high * 0.08, color)
+			star_color := pace_color(node.pace, 0.62 + node.high * 0.35, 180)
+			rl.DrawSphere({star_x, star_y, center.z}, 0.035 + node.high * 0.08, star_color)
+			if node.pace > 0.32 {
+				rl.DrawLine3D(
+					{star_x, star_y, center.z},
+					{star_x, star_y, center.z - 2 - node.pace * 8},
+					star_color,
+				)
+			}
 		}
 	}
 
 	ship_x := player_lane * LANE_WIDTH
-	ship_color := rl.ColorFromHSV(315 + pulse * 30, 0.65, 1)
-	for trail in 1 ..= 9 {
-		alpha := u8(100 / trail)
+	ship_color := pace_color(max(0.48, pace + pulse * 0.18), 1)
+	trail_count := 9 + int(pace_curve * 14)
+	for trail in 1 ..= trail_count {
+		alpha := u8(max(7, 125 / trail))
+		trail_color := pace_color(pace, 1, alpha)
 		rl.DrawSphere(
-			{ship_x, 0.25, -f32(trail) * 0.52},
-			0.22 / f32(trail) + 0.04,
-			rl.Color{60, 210, 255, alpha},
+			{ship_x + steer_lean * f32(trail) * 0.018, 0.25, -f32(trail) * (0.52 + pace * 0.28)},
+			0.25 / f32(trail) + 0.045,
+			trail_color,
 		)
 	}
-	rl.DrawCylinderEx({ship_x, 0.25, -0.3}, {ship_x, 0.25, 1.6}, 0.38, 0.06, 8, ship_color)
+	wing_tilt := steer_lean * 0.24
+	rl.DrawCylinderEx({ship_x, 0.28, -0.35}, {ship_x, 0.28, 1.75}, 0.44, 0.07, 8, ship_color)
 	rl.DrawTriangle3D(
-		{ship_x, 0.2, 0.8},
-		{ship_x - 0.95, 0.12, -0.2},
-		{ship_x, 0.2, 0.05},
+		{ship_x, 0.23, 1.0},
+		{ship_x - 1.18, 0.10 + wing_tilt, -0.28},
+		{ship_x, 0.23, 0.02},
 		ship_color,
 	)
 	rl.DrawTriangle3D(
-		{ship_x, 0.2, 0.8},
-		{ship_x, 0.2, 0.05},
-		{ship_x + 0.95, 0.12, -0.2},
+		{ship_x, 0.23, 1.0},
+		{ship_x, 0.23, 0.02},
+		{ship_x + 1.18, 0.10 - wing_tilt, -0.28},
 		ship_color,
 	)
-	rl.DrawSphere({ship_x, 0.28, 0}, 0.35 + pulse * 0.1, rl.WHITE)
+	rl.DrawSphere({ship_x - 0.42, 0.24 + wing_tilt * 0.3, -0.30}, 0.17 + pace * 0.08, rl.WHITE)
+	rl.DrawSphere({ship_x + 0.42, 0.24 - wing_tilt * 0.3, -0.30}, 0.17 + pace * 0.08, rl.WHITE)
+	rl.DrawSphere({ship_x, 0.31, 0}, 0.38 + pulse * 0.12, rl.WHITE)
 	rl.EndMode3D()
 }
 
@@ -690,7 +1006,8 @@ main :: proc() {
 	}
 	rl.PlayMusicStream(music)
 
-	player_lane: f32
+	player_lane, steer_lean: f32
+	mouse_active := false
 	last_index := 0
 	score, streak, best_streak, color_chain, crashes: int
 	last_tone: i32
@@ -723,11 +1040,24 @@ main :: proc() {
 			volume = min(0.8, volume + 0.05)
 			rl.SetMusicVolume(music, volume)
 		}
-		move := steer_input(
-			rl.IsKeyDown(.A) || rl.IsKeyDown(.LEFT),
-			rl.IsKeyDown(.D) || rl.IsKeyDown(.RIGHT),
-		)
-		player_lane = clamp(player_lane + move * dt * 2.2, -1, 1)
+		left_down := rl.IsKeyDown(.A) || rl.IsKeyDown(.LEFT)
+		right_down := rl.IsKeyDown(.D) || rl.IsKeyDown(.RIGHT)
+		move := steer_input(left_down, right_down)
+		lane_before_input := player_lane
+		mouse_delta := rl.GetMouseDelta()
+		if abs(mouse_delta.x) + abs(mouse_delta.y) > 0.15 || rl.IsMouseButtonPressed(.LEFT) {
+			mouse_active = true
+		}
+		if left_down || right_down {
+			mouse_active = false
+			player_lane = clamp(player_lane + move * dt * 2.2, -1, 1)
+		} else if mouse_active {
+			target_lane := mouse_lane_target(rl.GetMouseX(), rl.GetScreenWidth())
+			player_lane = smooth_mouse_lane(player_lane, target_lane, dt)
+		}
+		lane_speed := (player_lane - lane_before_input) / max(0.001, dt)
+		target_lean := clamp(lane_speed * 0.28, -1, 1)
+		steer_lean += (target_lean - steer_lean) * min(1, dt * 9)
 
 		time_played := rl.GetMusicTimePlayed(music)
 		node_time := time_played / STEP
@@ -793,26 +1123,40 @@ main :: proc() {
 
 		w, h := rl.GetScreenWidth(), rl.GetScreenHeight()
 		energy := nodes[current].bass * 0.6 + nodes[current].mid * 0.3 + nodes[current].high * 0.1
-		bg := rl.Color{u8(4 + energy * 8), u8(3 + energy * 3), u8(14 + energy * 18), 255}
+		pace_now := nodes[current].pace
+		pace_curve := pace_now * pace_now * (3 - 2 * pace_now)
+		bg_top := pace_color(pace_now, 0.06 + pace_curve * 0.10)
+		bg_bottom := pace_color(max(0, pace_now - 0.22), 0.012 + pace_curve * 0.025)
 		rl.BeginTextureMode(scene)
-		rl.ClearBackground(bg)
+		rl.ClearBackground(rl.BLACK)
+		rl.DrawRectangleGradientV(0, 0, scene.texture.width, scene.texture.height, bg_top, bg_bottom)
 		rl.BeginBlendMode(.ADDITIVE)
 		for ring in 0 ..< 5 {
-			radius := f32(90 + ring * 95) + pulse * 30
-			rl.DrawCircleLines(640, 360, radius, rl.Color{30, u8(40 + ring * 25), 120, 70})
+			radius := f32(90 + ring * 95) + pulse * 30 + pace_curve * f32(ring * 9)
+			ring_color := pace_color(pace_now, 0.42 + f32(ring) * 0.08, 45 + u8(ring * 8))
+			rl.DrawCircleLines(640, 360, radius, ring_color)
 		}
 		rl.EndBlendMode()
-		draw_ride(nodes, current, fraction, player_lane, pulse, shake)
+		draw_ride(nodes, current, fraction, player_lane, steer_lean, pulse, shake)
 		rl.EndTextureMode()
 
 		shader_time := f32(rl.GetTime())
 		rl.SetShaderValue(shader, time_loc, &shader_time, .FLOAT)
-		rl.SetShaderValue(shader, energy_loc, &energy, .FLOAT)
+		visual_energy := clamp(energy * 0.35 + pace_now * 0.75, 0, 1)
+		rl.SetShaderValue(shader, energy_loc, &visual_energy, .FLOAT)
 		rl.SetShaderValue(shader, pulse_loc, &pulse, .FLOAT)
 		visual_power := min(1, visual_amount + overdrive * 0.035)
 		rl.SetShaderValue(shader, amount_loc, &visual_power, .FLOAT)
 		source := rl.Rectangle{0, 0, f32(scene.texture.width), -f32(scene.texture.height)}
-		destination := rl.Rectangle{0, 0, f32(w), f32(h)}
+		scene_scale := min(f32(w) / f32(scene.texture.width), f32(h) / f32(scene.texture.height))
+		draw_width := f32(scene.texture.width) * scene_scale
+		draw_height := f32(scene.texture.height) * scene_scale
+		destination := rl.Rectangle{
+			(f32(w) - draw_width) * 0.5,
+			(f32(h) - draw_height) * 0.5,
+			draw_width,
+			draw_height,
+		}
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.BLACK)
 		if visual_fx && rl.IsShaderValid(shader) do rl.BeginShaderMode(shader)
@@ -831,6 +1175,9 @@ main :: proc() {
 		progress := f32(current) / f32(max(1, len(nodes) - 1))
 		rl.DrawRectangle(36, 98, 430, 4, rl.Color{30, 30, 55, 255})
 		rl.DrawRectangle(36, 98, i32(430 * progress), 4, rl.Color{50, 220, 255, 255})
+		map_width := i32(clamp(f32(w) * 0.29, 230, 370))
+		map_height := i32(clamp(f32(h) * 0.17, 108, 148))
+		draw_course_map(nodes, current, 24, 124, map_width, map_height)
 		for hull in 0 ..< 3 {
 			hull_color := rl.Color{45, 55, 80, 255}
 			if hull < shield do hull_color = rl.Color{70, 255, 145, 255}
@@ -848,12 +1195,12 @@ main :: proc() {
 			rl.TextFormat(
 				"%s  SPEED %.0f%%",
 				section_names[nodes[current].section],
-				38 + nodes[current].pace * 200,
+				52 + pace_curve * 275,
 			),
 			w - 210,
 			96,
 			18,
-			rl.Color{255, 215, 90, 255},
+			pace_color(pace_now, 1),
 		)
 		if overdrive > 0 {
 			rl.DrawText("OVERDRIVE x2", w / 2 - 100, 28, 25, rl.Color{255, 220, 55, 255})
@@ -873,7 +1220,7 @@ main :: proc() {
 		if !visual_fx do visual_label = "PSYCHO VISUAL: OFF [P]"
 		rl.DrawText(visual_label, 24, h - 82, 17, rl.Color{190, 130, 245, 255})
 		rl.DrawText(
-			"A/D steer   SPACE pause   P visual   ,/. visual power   B audio FX   [/] audio power   -/+ volume",
+			"A/D or MOUSE steer   SPACE pause   P visual   ,/. visual power   B audio FX   [/] audio power   -/+ volume",
 			24,
 			h - 32,
 			14,
@@ -885,6 +1232,15 @@ main :: proc() {
 			24,
 			17,
 			rl.Color{150, 190, 225, 255},
+		)
+		control_label: cstring = "KEYBOARD"
+		if mouse_active do control_label = "MOUSE"
+		rl.DrawText(
+			rl.TextFormat("STEER %s", control_label),
+			w - 120,
+			h - 58,
+			14,
+			rl.Color{115, 190, 220, 210},
 		)
 		if paused {
 			rl.DrawRectangle(0, 0, w, h, rl.Color{0, 0, 0, 130})
