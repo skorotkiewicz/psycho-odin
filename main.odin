@@ -476,8 +476,10 @@ smooth_mouse_lane :: proc(current, target, dt: f32) -> f32 {
 
 pace_color :: proc(pace, value: f32, alpha: u8 = 255) -> rl.Color {
 	// Cool cyan climbs travel through violet into hot gold/red descents.
-	hue := 205 + clamp(pace, 0, 1) * 177
-	color := rl.ColorFromHSV(hue, 0.62 + pace * 0.34, clamp(value, 0, 1))
+	p := clamp(pace, 0, 1)
+	heat := p * p * (3 - 2 * p)
+	hue := 195 + heat * 187
+	color := rl.ColorFromHSV(hue, 0.62 + p * 0.34, clamp(value, 0, 1))
 	color.a = alpha
 	return color
 }
@@ -730,7 +732,7 @@ draw_ride :: proc(
 		next_right := road_point(nodes, i + 1, nodes[i + 1].width, base_x, base_y, base_distance)
 		center := road_point(nodes, i, 0, base_x, base_y, base_distance)
 		surface_value := clamp(
-			0.11 + node.pace * 0.24 + node.energy * 0.22 + node.mid * 0.18,
+			0.19 + node.pace * 0.28 + node.energy * 0.28 + node.mid * 0.20,
 			0,
 			0.82,
 		)
@@ -876,34 +878,63 @@ draw_ride :: proc(
 	}
 
 	ship_x := player_lane * LANE_WIDTH
+	ship_y: f32 = 0.38
 	ship_color := pace_color(max(0.48, pace + pulse * 0.18), 1)
 	trail_count := 9 + int(pace_curve * 14)
 	for trail in 1 ..= trail_count {
 		alpha := u8(max(7, 125 / trail))
 		trail_color := pace_color(pace, 1, alpha)
 		rl.DrawSphere(
-			{ship_x + steer_lean * f32(trail) * 0.018, 0.25, -f32(trail) * (0.52 + pace * 0.28)},
-			0.25 / f32(trail) + 0.045,
+			{ship_x + steer_lean * f32(trail) * 0.018, ship_y, -f32(trail) * (0.52 + pace * 0.28)},
+			0.29 / f32(trail) + 0.05,
 			trail_color,
 		)
 	}
 	wing_tilt := steer_lean * 0.24
-	rl.DrawCylinderEx({ship_x, 0.28, -0.35}, {ship_x, 0.28, 1.75}, 0.44, 0.07, 8, ship_color)
+	rl.DrawCylinderEx(
+		{ship_x, ship_y, -0.45},
+		{ship_x, ship_y, 2.0},
+		0.56,
+		0.08,
+		8,
+		pace_color(pace, 0.46),
+	)
+	rl.DrawCylinderWiresEx(
+		{ship_x, ship_y, -0.45},
+		{ship_x, ship_y, 2.0},
+		0.56,
+		0.08,
+		8,
+		rl.Color{235, 245, 255, 230},
+	)
 	rl.DrawTriangle3D(
-		{ship_x, 0.23, 1.0},
-		{ship_x - 1.18, 0.10 + wing_tilt, -0.28},
-		{ship_x, 0.23, 0.02},
+		{ship_x, ship_y, 1.22},
+		{ship_x - 1.48, 0.18 + wing_tilt, -0.34},
+		{ship_x, ship_y, 0.02},
 		ship_color,
 	)
 	rl.DrawTriangle3D(
-		{ship_x, 0.23, 1.0},
-		{ship_x, 0.23, 0.02},
-		{ship_x + 1.18, 0.10 - wing_tilt, -0.28},
+		{ship_x, ship_y, 1.22},
+		{ship_x, ship_y, 0.02},
+		{ship_x + 1.48, 0.18 - wing_tilt, -0.34},
 		ship_color,
 	)
-	rl.DrawSphere({ship_x - 0.42, 0.24 + wing_tilt * 0.3, -0.30}, 0.17 + pace * 0.08, rl.WHITE)
-	rl.DrawSphere({ship_x + 0.42, 0.24 - wing_tilt * 0.3, -0.30}, 0.17 + pace * 0.08, rl.WHITE)
-	rl.DrawSphere({ship_x, 0.31, 0}, 0.38 + pulse * 0.12, rl.WHITE)
+	for side in -1 ..= 1 {
+		if side == 0 do continue
+		pod_x := ship_x + f32(side) * 0.55
+		pod_y := ship_y - f32(side) * wing_tilt * 0.35
+		rl.DrawCylinderEx(
+			{pod_x, pod_y, -0.46},
+			{pod_x, pod_y, 0.72},
+			0.24,
+			0.13,
+			7,
+			pace_color(pace, 0.72),
+		)
+		rl.DrawSphere({pod_x, pod_y, -0.45}, 0.22 + pace * 0.07, rl.WHITE)
+	}
+	rl.DrawSphere({ship_x, ship_y + 0.24, 0.30}, 0.34 + pulse * 0.10, ship_color)
+	rl.DrawSphereWires({ship_x, ship_y + 0.24, 0.30}, 0.37 + pulse * 0.10, 7, 7, rl.WHITE)
 	rl.EndMode3D()
 }
 
@@ -912,12 +943,18 @@ main :: proc() {
 		self_test()
 		return
 	}
-	if len(os.args) != 2 {
-		fmt.eprintln("usage: ./psycho <music.wav|mp3|ogg|flac>\n       ./psycho --self-test")
+	analyze_only := len(os.args) == 3 && os.args[1] == "--analyze"
+	if len(os.args) != 2 && !analyze_only {
+		fmt.eprintln(
+			"usage: ./psycho <music.wav|mp3|ogg|flac>\n" +
+			"       ./psycho --analyze <music.wav|mp3|ogg|flac>\n" +
+			"       ./psycho --self-test",
+		)
 		return
 	}
 
 	audio_path := os.args[1]
+	if analyze_only do audio_path = os.args[2]
 	file_bytes, file_err := os.read_entire_file(audio_path, context.allocator)
 	if file_err != nil {
 		fmt.eprintfln("psycho: cannot read %q: %v", audio_path, file_err)
@@ -967,17 +1004,23 @@ main :: proc() {
 		}
 	}
 	defer delete(nodes)
+	if analyze_only {
+		fmt.println("map: analysis complete")
+		return
+	}
 
 	rl.SetConfigFlags({.MSAA_4X_HINT, .VSYNC_HINT, .WINDOW_RESIZABLE})
 	rl.InitWindow(1280, 720, "PSYCHO // sound ride")
 	defer rl.CloseWindow()
 	rl.SetTargetFPS(120)
-	scene := rl.LoadRenderTexture(1280, 720)
+	scene := rl.LoadRenderTexture(rl.GetScreenWidth(), rl.GetScreenHeight())
 	if !rl.IsRenderTextureValid(scene) {
 		fmt.eprintln("psycho: could not create render target")
 		return
 	}
-	defer rl.UnloadRenderTexture(scene)
+	defer {
+		rl.UnloadRenderTexture(scene)
+	}
 	shader := rl.LoadShaderFromMemory(nil, PSYCHO_SHADER)
 	defer rl.UnloadShader(shader)
 	time_loc := rl.GetShaderLocation(shader, "time")
@@ -1122,19 +1165,32 @@ main :: proc() {
 		}
 
 		w, h := rl.GetScreenWidth(), rl.GetScreenHeight()
+		if rl.IsWindowResized() && w > 0 && h > 0 {
+			resized_scene := rl.LoadRenderTexture(w, h)
+			if rl.IsRenderTextureValid(resized_scene) {
+				rl.UnloadRenderTexture(scene)
+				scene = resized_scene
+			}
+		}
 		energy := nodes[current].bass * 0.6 + nodes[current].mid * 0.3 + nodes[current].high * 0.1
 		pace_now := nodes[current].pace
 		pace_curve := pace_now * pace_now * (3 - 2 * pace_now)
-		bg_top := pace_color(pace_now, 0.06 + pace_curve * 0.10)
-		bg_bottom := pace_color(max(0, pace_now - 0.22), 0.012 + pace_curve * 0.025)
+		bg_top := pace_color(pace_now, 0.09 + pace_curve * 0.12)
+		bg_bottom := pace_color(max(0, pace_now - 0.22), 0.018 + pace_curve * 0.032)
 		rl.BeginTextureMode(scene)
 		rl.ClearBackground(rl.BLACK)
 		rl.DrawRectangleGradientV(0, 0, scene.texture.width, scene.texture.height, bg_top, bg_bottom)
 		rl.BeginBlendMode(.ADDITIVE)
+		scene_center_x := scene.texture.width / 2
+		scene_center_y := scene.texture.height / 2
+		scene_radius := f32(min(scene.texture.width, scene.texture.height))
 		for ring in 0 ..< 5 {
-			radius := f32(90 + ring * 95) + pulse * 30 + pace_curve * f32(ring * 9)
+			radius :=
+				scene_radius * (0.12 + f32(ring) * 0.13) +
+				pulse * 30 +
+				pace_curve * f32(ring * 9)
 			ring_color := pace_color(pace_now, 0.42 + f32(ring) * 0.08, 45 + u8(ring * 8))
-			rl.DrawCircleLines(640, 360, radius, ring_color)
+			rl.DrawCircleLines(scene_center_x, scene_center_y, radius, ring_color)
 		}
 		rl.EndBlendMode()
 		draw_ride(nodes, current, fraction, player_lane, steer_lean, pulse, shake)
@@ -1148,15 +1204,7 @@ main :: proc() {
 		visual_power := min(1, visual_amount + overdrive * 0.035)
 		rl.SetShaderValue(shader, amount_loc, &visual_power, .FLOAT)
 		source := rl.Rectangle{0, 0, f32(scene.texture.width), -f32(scene.texture.height)}
-		scene_scale := min(f32(w) / f32(scene.texture.width), f32(h) / f32(scene.texture.height))
-		draw_width := f32(scene.texture.width) * scene_scale
-		draw_height := f32(scene.texture.height) * scene_scale
-		destination := rl.Rectangle{
-			(f32(w) - draw_width) * 0.5,
-			(f32(h) - draw_height) * 0.5,
-			draw_width,
-			draw_height,
-		}
+		destination := rl.Rectangle{0, 0, f32(w), f32(h)}
 		rl.BeginDrawing()
 		rl.ClearBackground(rl.BLACK)
 		if visual_fx && rl.IsShaderValid(shader) do rl.BeginShaderMode(shader)

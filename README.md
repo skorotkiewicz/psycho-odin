@@ -1,20 +1,25 @@
 # PSYCHO
 
 An audio-reactive puzzle racer in Odin and raylib. It analyzes song-relative
-bass, mids, highs, dynamics, and transients, then composes six-second musical
-movements: quiet climbs, bass-heavy drops, mid-driven slaloms, and treble
-tunnels. Each has distinct curves, banking, width, speed, traffic choreography,
-gates, portals, scenery, hazards, boosts, and powerups.
+bass, mids, highs, robust dynamic range, adaptive transients, local beat density,
+and tempo confidence, then composes six-second musical movements: quiet climbs,
+bass-heavy drops, mid-driven slaloms, and treble tunnels. Each has distinct
+curves, banking, width, speed, traffic choreography, gates, portals, scenery,
+hazards, boosts, and powerups.
 Generated maps are cached by audio-content hash.
 
 Every tenth of a second, local song-relative energy and onset density become a
-`pace` value. Pace alone controls grade and world distance: calm or paused
-music climbs slowly, while busy/intense music crests into a fast descent.
-Movement labels control visual style and curves, never override the rhythm.
+`pace` value, with local tempo separating fast rhythmic passages from equally
+loud sustained ones. Pace controls grade, world distance, camera energy, trail
+length, and palette heat: calm music climbs slowly in cool colors, while
+busy/intense music crests into a hot, fast descent. The HUD profile previews the
+whole rollercoaster and marks the live song position. Movement labels control
+visual style and curves, never override the rhythm.
 
 ```sh
 odin build . -out:psycho
 ./psycho music.wav
+./psycho --analyze music.wav # optional: fill the cache without opening a window
 ```
 
 Raylib also accepts MP3, OGG, and FLAC. Cached maps live in `.psycho_cache/`;
@@ -25,11 +30,12 @@ and collect green shields. Three hull hits cause a crash and halve the score,
 but the ride continues. Gold cubes trigger six seconds of double-score
 overdrive and stronger visual effects.
 
-Controls: `A/D` or arrows steer, `Space` pauses, `F` toggles fullscreen,
-`P` toggles the psychedelic post-process, `,`/`.` changes visual strength,
-`B` toggles experimental binaural/spatial audio, `[`/`]` changes audio-effect
-strength, and `-`/`+` changes volume. Stereo headphones are required for the
-binaural effect.
+Controls: move the mouse horizontally, or use `A/D` or arrows, to steer. The
+most recently used device takes control, so switching is seamless. `Space`
+pauses, `F` toggles fullscreen, `P` toggles the psychedelic post-process,
+`,`/`.` changes visual strength, `B` toggles experimental binaural/spatial
+audio, `[`/`]` changes audio-effect strength, and `-`/`+` changes volume.
+Stereo headphones are required for the binaural effect.
 
 The audio layer is entertainment, not treatment. Research does not establish
 one best binaural frequency, and outcomes are mixed and protocol-dependent.
