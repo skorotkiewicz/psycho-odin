@@ -7,6 +7,11 @@ tunnels. Each has distinct curves, banking, width, speed, traffic choreography,
 gates, portals, scenery, hazards, boosts, and powerups.
 Generated maps are cached by audio-content hash.
 
+Every tenth of a second, local song-relative energy and onset density become a
+`pace` value. Pace alone controls grade and world distance: calm or paused
+music climbs slowly, while busy/intense music crests into a fast descent.
+Movement labels control visual style and curves, never override the rhythm.
+
 ```sh
 odin build . -out:psycho
 ./psycho music.wav
@@ -45,6 +50,7 @@ filter-bank analyzer, continuous steering, chain scoring, hazards, and effects.
 
 - AudioSurf's official gameplay description: https://store.steampowered.com/app/12900/AudioSurf/
 - Dylan Fitterer interview on hills and traffic: https://arstechnica.com/gaming/2008/03/catching-waveforms-audiosurf-creator-dylan-speaks/
+- AudioSurf review documenting slow/uphill and fast/downhill mapping: https://www.gamespot.com/reviews/audiosurf-review/1900-6189185/
 
 ```sh
 ./psycho --self-test

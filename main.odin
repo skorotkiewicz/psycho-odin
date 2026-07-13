@@ -9,7 +9,7 @@ import "core:strings"
 import rl "vendor:raylib"
 
 MAP_MAGIC :: u64(0x50535943484f3031) // PSYCHO01
-MAP_VERSION :: u32(4)
+MAP_VERSION :: u32(5)
 STEP :: f32(0.10)
 ROAD_STEP :: f32(5.5)
 LANE_WIDTH :: f32(2.6)
@@ -57,7 +57,8 @@ void main() {
 
 Track_Node :: struct {
 	bass, mid, high:  f32,
-	energy, width:    f32,
+	energy, onset:    f32,
+	pace, width:      f32,
 	curve_x, curve_y: f32,
 	distance:         f32,
 	beat:             f32,
@@ -164,6 +165,7 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 	low_alpha := f32(1 - math.exp(-2 * math.PI * 180 / f64(sample_rate)))
 	body_alpha := f32(1 - math.exp(-2 * math.PI * 2400 / f64(sample_rate)))
 	mean_energy: f32
+	song_seed: u32 = 2166136261
 
 	// First pass: inexpensive three-band filter bank. It is plenty for level generation;
 	// ponytail: replace with an FFT only if profiling/playtests show missing musical detail.
@@ -189,65 +191,86 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 		high := f32(math.sqrt(high_sum / n))
 		nodes[node_i].bass, nodes[node_i].mid, nodes[node_i].high = bass, mid, high
 		mean_energy += bass * 0.9 + mid * 0.65 + high * 0.35
+		song_seed = (song_seed ~ u32((bass * 997 + mid * 619 + high * 389) * 1_000_000)) * 16777619
 	}
 	mean_energy = max(mean_energy / f32(count), 0.0001)
 
 	// Second pass normalizes dynamics against the whole song so quiet and loud masters play alike.
-	smooth_energy: f32
 	for node_i in 0 ..< count {
 		node := &nodes[node_i]
 		raw_energy := node.bass * 0.9 + node.mid * 0.65 + node.high * 0.35
 		intensity := clamp(raw_energy / (mean_energy * 2.15), 0, 1)
-		if node_i == 0 do smooth_energy = intensity
-		smooth_energy = smooth_energy * 0.82 + intensity * 0.18
 		band_scale := 1 / (mean_energy * 2.4)
 		node.bass = clamp(node.bass * band_scale, 0, 1)
 		node.mid = clamp(node.mid * band_scale, 0, 1)
 		node.high = clamp(node.high * band_scale, 0, 1)
-		node.energy = smooth_energy
+		node.energy = intensity
 	}
 
-	// Third pass composes six-second musical movements instead of one generic wobble.
-	SECTION_LENGTH :: 64
+	// Onsets provide the rhythmic half of pace; loudness alone cannot distinguish busy from sustained music.
 	flux_average, prior_bass, prior_mid: f32
-	height, slope, curve, turn, distance: f32
-	section, previous_section := CLIMB, CLIMB
-	section_direction: f32 = 1
 	last_beat := -10
 	for node_i in 0 ..< count {
 		node := &nodes[node_i]
-		section_start := (node_i / SECTION_LENGTH) * SECTION_LENGTH
-		if node_i % SECTION_LENGTH == 0 {
-			previous_section = section
-			end := min(count, node_i + SECTION_LENGTH)
-			bass, mid, high, energy: f32
-			for look in node_i ..< end {
-				bass += nodes[look].bass
-				mid += nodes[look].mid
-				high += nodes[look].high
-				energy += nodes[look].energy
-			}
-			n := f32(max(1, end - node_i))
-			bass, mid, high, energy = bass / n, mid / n, high / n, energy / n
-			if energy < 0.32 do section = CLIMB
-			else if bass >= mid && bass >= high do section = DROP
-			else if high > bass && high > mid * 0.28 do section = TUNNEL
-			else do section = SLALOM
-			section_direction = 1
-			if ((u32(node_i / SECTION_LENGTH) * 747796405 + 2891336453) & 1) == 0 do section_direction = -1
-		}
-		node.section = section
-		phase := f32(node_i - section_start) / f32(SECTION_LENGTH)
-		seed := u32(node_i) * 1664525 + 1013904223
-
-		flux := max(0, node.bass - prior_bass) * 0.75 + max(0, node.mid - prior_mid) * 0.4
+		flux :=
+			max(0, node.bass - prior_bass) * 0.75 +
+			max(0, node.mid - prior_mid) * 0.4 +
+			max(0, node.high - nodes[max(0, node_i - 1)].high) * 0.2
 		flux_average = flux_average * 0.9 + flux * 0.1
+		node.onset = clamp(flux * 2.8, 0, 1)
 		if node_i > 8 && node_i - last_beat > 2 && flux > max(0.045, flux_average * 1.65) {
 			node.beat = clamp(flux * 2.8, 0.3, 1)
 			node.kind = PICKUP
 			last_beat = node_i
 		}
 		prior_bass, prior_mid = node.bass, node.mid
+	}
+
+	// Offline look-around makes a crest arrive with a drop instead of lagging behind it.
+	for node_i in 0 ..< count {
+		energy, activity, weight_sum: f32
+		for look := max(0, node_i - 3); look <= min(count - 1, node_i + 3); look += 1 {
+			weight := f32(4 - abs(look - node_i))
+			energy += nodes[look].energy * weight
+			activity += nodes[look].onset * weight
+			weight_sum += weight
+		}
+		energy /= weight_sum
+		activity = clamp(activity / weight_sum * 3.2, 0, 1)
+		texture := clamp(nodes[node_i].mid + nodes[node_i].high, 0, 1)
+		nodes[node_i].pace = clamp(energy * 0.72 + activity * 0.22 + texture * 0.06, 0, 1)
+	}
+
+	// Third pass composes six-second musical movements instead of one generic wobble.
+	SECTION_LENGTH :: 64
+	height, slope, curve, turn, distance: f32
+	section, previous_section := CLIMB, CLIMB
+	section_direction: f32 = 1
+	for node_i in 0 ..< count {
+		node := &nodes[node_i]
+		section_start := (node_i / SECTION_LENGTH) * SECTION_LENGTH
+		if node_i % SECTION_LENGTH == 0 {
+			previous_section = section
+			end := min(count, node_i + SECTION_LENGTH)
+			bass, mid, high, pace: f32
+			for look in node_i ..< end {
+				bass += nodes[look].bass
+				mid += nodes[look].mid
+				high += nodes[look].high
+				pace += nodes[look].pace
+			}
+			n := f32(max(1, end - node_i))
+			bass, mid, high, pace = bass / n, mid / n, high / n, pace / n
+			if high > bass && high > mid * 0.28 do section = TUNNEL
+			else if pace < 0.32 do section = CLIMB
+			else if bass >= mid && bass >= high do section = DROP
+			else do section = SLALOM
+			section_direction = 1
+			if ((song_seed ~ (u32(node_i / SECTION_LENGTH) * 747796405 + 2891336453)) & 1) == 0 do section_direction = -1
+		}
+		node.section = section
+		phase := f32(node_i - section_start) / f32(SECTION_LENGTH)
+		seed := song_seed ~ (u32(node_i) * 1664525 + 1013904223)
 
 		node.lane = i32(seed % 3) - 1
 		if section == SLALOM do node.lane = i32((node_i / 3) % 3) - 1
@@ -260,51 +283,51 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 			node.kind = SHIELD
 		} else if node.kind == 0 && node_i % SECTION_LENGTH == 3 {
 			node.kind = BOOST
-		} else if node.kind == 0 && node.energy > 0.48 && node_i % 5 == 2 && roll < 78 {
+		} else if node.kind == 0 && node.pace > 0.48 && node_i % 5 == 2 && roll < 78 {
 			node.kind = HAZARD
 		} else if node.kind == 0 && node_i % 3 == 0 && roll < 78 && node.mid + node.high > 0.20 {
 			node.kind = PICKUP
 			node.beat = 0.20 + min(0.38, node.high * 0.45)
 		}
 
-		base_slope := (0.48 - node.energy) * 0.34
+		// Pace alone owns grade and distance: calm music climbs slowly, busy music dives quickly.
+		base_slope := (0.46 - node.pace) * 0.78 - node.onset * 0.06 - height * 0.00018
 		turn_target: f32
 		switch section {
 		case CLIMB:
-			base_slope += 0.11
-			turn_target = f32(math.sin(f64(phase * math.PI))) * 0.11 * section_direction
+			turn_target =
+				f32(math.sin(f64(phase * math.PI))) * (0.08 + node.pace * 0.12) * section_direction
 			node.width = 3.9
 		case DROP:
-			base_slope -= 0.13 + node.bass * 0.10
-			turn_target = (0.16 + node.energy * 0.16) * section_direction
+			turn_target = (0.14 + node.pace * 0.18) * section_direction
 			node.width = 4.8
 		case SLALOM:
-			base_slope += f32(math.sin(f64(phase * 2 * math.PI))) * 0.12
-			turn_target = f32(math.sin(f64(phase * 4 * math.PI))) * 0.78
+			turn_target =
+				f32(math.sin(f64(phase * 4 * math.PI + f32(song_seed & 255) * 0.01))) *
+				(0.48 + node.mid * 0.42)
 			node.width = 4.25
 		case TUNNEL:
-			base_slope += f32(math.sin(f64(phase * 4 * math.PI))) * 0.17
-			turn_target = f32(math.sin(f64(phase * 6 * math.PI))) * 0.62 * section_direction
+			turn_target =
+				f32(math.sin(f64(phase * 6 * math.PI))) *
+				(0.40 + node.high * 0.38) *
+				section_direction
 			node.width = 4.35
 		}
-		slope = slope * 0.76 + base_slope * 0.24
+		slope = slope * 0.55 + base_slope * 0.45
 		height += slope
-		if abs(height) > 22 {
-			height = clamp(height, -22, 22)
-			slope *= -0.55
-		}
 		turn = turn * 0.70 + turn_target * 0.30 - curve * 0.0012
 		curve += turn
 		if abs(curve) > 30 {
 			curve = clamp(curve, -30, 30)
 			turn *= -0.55
 		}
-		distance += ROAD_STEP * (0.62 + node.energy * 1.25)
+		distance += ROAD_STEP * (0.38 + node.pace * 2.0)
 
 		if node_i % SECTION_LENGTH == 0 do node.feature = PORTAL
 		if section == TUNNEL && node_i % 4 == 0 do node.feature = ARCH
 		if node.beat > 0.65 do node.feature = GATE
 		if node_i % SECTION_LENGTH == 0 && previous_section == CLIMB && section == DROP do node.feature = RAMP
+		if node_i > 0 && node.pace - nodes[node_i - 1].pace > 0.16 do node.feature = RAMP
 		node.curve_x, node.curve_y, node.distance = curve, height, distance
 	}
 	return nodes
@@ -363,6 +386,38 @@ self_test :: proc() {
 	assert(max_x - min_x > 16 && max_y - min_y > 18 && features > 4)
 	assert(steer_input(true, false) > 0, "A/left must move toward screen-left for a +Z camera")
 
+	// One-second dynamics must shape the road even inside the same visual movement.
+	rhythm_samples := make([]f32, rate * 12)
+	defer delete(rhythm_samples)
+	for i in 0 ..< len(rhythm_samples) {
+		t := f64(i) / f64(rate)
+		amplitude: f32 = 0.025
+		if (i / rate) % 2 == 1 do amplitude = 0.30
+		rhythm_samples[i] = f32(math.sin(2 * math.PI * 100 * t)) * amplitude
+	}
+	rhythm := analyze_samples(raw_data(rhythm_samples), len(rhythm_samples), rate, 1)
+	defer delete(rhythm)
+	quiet_slope, loud_slope, quiet_speed, loud_speed: f32
+	quiet_count, loud_count: int
+	for i in 1 ..< len(rhythm) {
+		if i % 10 < 4 do continue
+		slope := rhythm[i].curve_y - rhythm[i - 1].curve_y
+		speed := rhythm[i].distance - rhythm[i - 1].distance
+		if (i / 10) % 2 == 0 {
+			quiet_slope += slope
+			quiet_speed += speed
+			quiet_count += 1
+		} else {
+			loud_slope += slope
+			loud_speed += speed
+			loud_count += 1
+		}
+	}
+	quiet_slope, loud_slope = quiet_slope / f32(quiet_count), loud_slope / f32(loud_count)
+	quiet_speed, loud_speed = quiet_speed / f32(quiet_count), loud_speed / f32(loud_count)
+	assert(quiet_slope > 0.08 && loud_slope < -0.08)
+	assert(loud_speed > quiet_speed * 1.8)
+
 	path := ".psycho_cache/self-test.map"
 	assert(save_map(path, nodes))
 	loaded, ok := load_map(path)
@@ -402,7 +457,7 @@ draw_ride :: proc(nodes: []Track_Node, current: int, fraction, player_lane, puls
 		position   = {player_lane * LANE_WIDTH * 0.3 + shake_x, 3.0 + shake_y, -8.8},
 		target     = {look.x * 0.20, look.y * 0.32 + 0.15, max(28, look.z)},
 		up         = {-camera_bank, 1, 0},
-		fovy       = 74 + nodes[current].bass * 5,
+		fovy       = 70 + nodes[current].pace * 14,
 		projection = .PERSPECTIVE,
 	}
 	rl.BeginMode3D(camera)
@@ -793,7 +848,7 @@ main :: proc() {
 			rl.TextFormat(
 				"%s  SPEED %.0f%%",
 				section_names[nodes[current].section],
-				nodes[current].energy * 100,
+				38 + nodes[current].pace * 200,
 			),
 			w - 210,
 			96,
