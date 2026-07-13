@@ -2,14 +2,117 @@
 
 set shell := ["bash", "-uc"]
 
-# odin   := "./odin-dev/odin" # version dev-2026-07-nightly:819fdc7
-odin   := "odin"
-binary := "psycho"
-cache  := ".psycho_cache"
+odin_dir         := "./odin-dev"
+odin             := "./odin-dev/odin"
+odin_release_api := "https://api.github.com/repos/odin-lang/Odin/releases/latest"
+binary           := "psycho"
+cache            := ".psycho_cache"
 
 [private]
 default:
     @just --list
+
+
+# Download the latest official Odin release; existing installs are reused.
+setup:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    target="{{odin_dir}}"
+    compiler="{{odin}}"
+
+    if [[ -x "$compiler" ]]; then
+        echo "Odin already installed: $("$compiler" version)"
+        exit 0
+    fi
+
+    if [[ -e "$target" ]]; then
+        echo "error: $target exists, but $compiler is not executable" >&2
+        echo "Move or remove that directory, then run 'just setup' again." >&2
+        exit 1
+    fi
+
+    for tool in curl tar awk; do
+        if ! command -v "$tool" >/dev/null; then
+            echo "error: '$tool' is required to install Odin" >&2
+            exit 1
+        fi
+    done
+
+    case "$(uname -s)" in
+        Linux)  platform="linux" ;;
+        Darwin) platform="macos" ;;
+        *)
+            echo "error: automatic Odin setup supports Linux and macOS" >&2
+            exit 1
+            ;;
+    esac
+
+    case "$(uname -m)" in
+        x86_64|amd64) architecture="amd64" ;;
+        arm64|aarch64) architecture="arm64" ;;
+        *)
+            echo "error: automatic Odin setup supports AMD64 and ARM64" >&2
+            exit 1
+            ;;
+    esac
+
+    temporary="$(mktemp -d "${TMPDIR:-/tmp}/psycho-odin.XXXXXX")"
+    trap 'rm -rf "$temporary"' EXIT
+    release_json="$temporary/release.json"
+    archive="$temporary/odin.tar.gz"
+    unpacked="$temporary/unpacked"
+
+    echo "Finding the latest Odin release for ${platform}-${architecture}..."
+    curl -fsSL --retry 3 "{{odin_release_api}}" -o "$release_json"
+
+    asset_url="$(
+        awk -v stem="odin-${platform}-${architecture}-dev-" '
+            /"browser_download_url":/ && index($0, stem) {
+                value = $0
+                sub(/^.*"browser_download_url": "/, "", value)
+                sub(/".*$/, "", value)
+                if (value ~ /\.tar\.gz$/) {
+                    print value
+                    exit
+                }
+            }
+        ' "$release_json"
+    )"
+
+    if [[ -z "$asset_url" ]]; then
+        echo "error: the latest release has no ${platform}-${architecture} archive" >&2
+        exit 1
+    fi
+
+    echo "Downloading ${asset_url##*/}..."
+    curl -fL --retry 3 --progress-bar "$asset_url" -o "$archive"
+    mkdir "$unpacked"
+    tar -xzf "$archive" -C "$unpacked"
+
+    extracted_compiler=""
+    for candidate in "$unpacked/odin" "$unpacked"/*/odin; do
+        if [[ -f "$candidate" ]]; then
+            extracted_compiler="$candidate"
+            break
+        fi
+    done
+    if [[ -z "$extracted_compiler" || ! -x "$extracted_compiler" ]]; then
+        echo "error: the downloaded archive does not contain an executable Odin compiler" >&2
+        exit 1
+    fi
+
+    install_root="${extracted_compiler%/odin}"
+    for directory in base core vendor; do
+        if [[ ! -d "$install_root/$directory" ]]; then
+            echo "error: the downloaded archive is missing '$directory/'" >&2
+            exit 1
+        fi
+    done
+
+    "$extracted_compiler" version >/dev/null
+    mv "$install_root" "$target"
+    echo "Installed $("$compiler" version) in $target"
 
 
 # Remove generated files.
@@ -18,23 +121,23 @@ clean:
 
 
 # Normal optimized build.
-build: clean
+build: setup clean
     {{odin}} build . -out:{{binary}} -o:speed
 
 
 # Debug build with symbols and no optimization.
-build-debug: clean
+build-debug: setup clean
     {{odin}} build . -out:{{binary}} -debug -o:none
 
 
 # Optimize for executable size.
-build-size: clean
+build-size: setup clean
     {{odin}} build . -out:{{binary}} -o:size
 
 
 # Aggressive native-machine build.
 # Fast, but less portable and more aggressive than normal release builds.
-build-native: clean
+build-native: setup clean
     {{odin}} build . \
         -out:{{binary}} \
         -o:aggressive \
@@ -42,7 +145,7 @@ build-native: clean
 
 
 # Build and print compiler timing information.
-build-timings: clean
+build-timings: setup clean
     {{odin}} build . \
         -out:{{binary}} \
         -o:speed \
@@ -50,12 +153,12 @@ build-timings: clean
 
 
 # Fast semantic/type check without producing an executable.
-check:
+check: setup
     {{odin}} check .
 
 
 # Additional compiler vetting.
-vet:
+vet: setup
     {{odin}} check . \
         -vet \
         -vet-tabs \
@@ -64,7 +167,7 @@ vet:
 
 
 # Strict CI-style linting.
-lint:
+lint: setup
     {{odin}} check . \
         -vet \
         -vet-tabs \
@@ -91,7 +194,7 @@ fmt:
 
 # Run the project in debug mode.
 # Example: just run --level test.json
-run *args:
+run *args: setup
     {{odin}} run . -debug -- {{args}}
 
 
@@ -101,7 +204,7 @@ exec *args: build
 
 
 # Run Odin tests.
-test:
+test: setup
     {{odin}} test . \
         -vet \
         -vet-tabs \
@@ -109,7 +212,7 @@ test:
 
 
 # Run tests with AddressSanitizer.
-test-asan:
+test-asan: setup
     {{odin}} test . \
         -debug \
         -sanitize:address \
@@ -121,6 +224,6 @@ all: fmt lint test build
 
 
 # Display compiler version and environment report.
-info:
+info: setup
     {{odin}} version
     {{odin}} report

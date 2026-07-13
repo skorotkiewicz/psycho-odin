@@ -42,8 +42,21 @@ of the entire ride.
 
 ## Quick start
 
-You need an Odin toolchain with its raylib vendor package. With `odin` available
-on your `PATH`:
+The shortest route needs [`just`](https://github.com/casey/just), `curl`, `tar`,
+and the [platform linker required by Odin](https://odin-lang.org/docs/install/).
+The first build downloads the latest
+[official Odin release](https://github.com/odin-lang/Odin/releases) into the
+ignored `./odin-dev` directory; later builds reuse it.
+The bootstrap supports Linux and macOS on AMD64 and ARM64.
+
+```sh
+just build
+./psycho ~/Music/your-song.mp3
+```
+
+Run `just setup` if you only want to prepare the local compiler. If you already
+have an Odin toolchain with its raylib vendor package on your `PATH`, you can
+build directly instead:
 
 ```sh
 odin build . -out:psycho -o:speed
@@ -52,13 +65,6 @@ odin build . -out:psycho -o:speed
 
 PSYCHO accepts the common formats supported by raylib, including WAV, MP3, OGG,
 and FLAC.
-
-The included `justfile` can drive a local toolchain stored at `./odin-dev`:
-
-```sh
-just build
-./psycho ~/Music/your-song.mp3
-```
 
 The first run performs the deeper offline analysis. Generated maps are stored in
 `.psycho_cache/` by audio-content hash, so later runs start immediately.
