@@ -202,20 +202,19 @@ exec *args: build
     ./{{binary}} {{args}}
 
 
-# Run Odin tests.
-test: setup
-    {{odin}} test "{{source}}" \
-        -vet \
-        -vet-tabs \
-        -vet-style
+# Run PSYCHO's deterministic integration test.
+test: build-debug
+    ./{{binary}} --self-test
 
 
-# Run tests with AddressSanitizer.
+# Run the same test under AddressSanitizer.
 test-asan: setup
-    {{odin}} test "{{source}}" \
+    {{odin}} build "{{source}}" \
+        -out:{{binary}} \
         -debug \
         -sanitize:address \
         -vet
+    ./{{binary}} --self-test
 
 
 # Format, lint, test, and build.
