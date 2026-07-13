@@ -765,6 +765,29 @@ self_test :: proc() {
 	)
 	assert(future_center.z > 1, "future cached centerline must remain ahead in the local tangent frame")
 	assert(abs(future_center.x) > 0.1, "future tangent transform must expose the upcoming bend")
+	sample_boundary := f32(probe_i + 10)
+	preview_before := road_center_sample(
+		nodes,
+		sample_boundary + 0.999,
+		probe.curve_x,
+		probe.curve_y,
+		probe.curve_z,
+		probe.heading,
+	)
+	preview_after := road_center_sample(
+		nodes,
+		sample_boundary + 1.001,
+		probe.curve_x,
+		probe.curve_y,
+		probe.curve_z,
+		probe.heading,
+	)
+	preview_dx := preview_after.x - preview_before.x
+	preview_dy := preview_after.y - preview_before.y
+	preview_dz := preview_after.z - preview_before.z
+	preview_jump := f32(math.sqrt(f64(preview_dx * preview_dx + preview_dy * preview_dy + preview_dz * preview_dz)))
+	fmt.printfln("self-test: camera preview cache-boundary jump %.3f", preview_jump)
+	assert(preview_jump < 0.10, "camera preview must move continuously across cached audio slices")
 	assert(abs(lane_position(4.8, 1) - 3.2) < 0.001)
 	assert(steer_input(true, false) > 0, "A/left must move toward screen-left for a +Z camera")
 	assert(mouse_lane_target(0, 1000) > 0.99)
@@ -902,11 +925,54 @@ road_point :: proc(
 	}
 }
 
+track_sample_indices :: proc(nodes: []Track_Node, node_position: f32) -> (i, next_i: int, fraction: f32) {
+	position := clamp(node_position, 0, f32(len(nodes) - 1))
+	i = int(position)
+	next_i = min(i + 1, len(nodes) - 1)
+	fraction = position - f32(i)
+	return
+}
+
+road_center_sample :: proc(
+	nodes: []Track_Node,
+	node_position, base_x, base_y, base_z, base_heading: f32,
+) -> rl.Vector3 {
+	i, next_i, fraction := track_sample_indices(nodes, node_position)
+	a := road_point(nodes, i, 0, base_x, base_y, base_z, base_heading)
+	b := road_point(nodes, next_i, 0, base_x, base_y, base_z, base_heading)
+	return {
+		a.x + (b.x - a.x) * fraction,
+		a.y + (b.y - a.y) * fraction,
+		a.z + (b.z - a.z) * fraction,
+	}
+}
+
+heading_sample :: proc(nodes: []Track_Node, node_position: f32) -> f32 {
+	i, next_i, fraction := track_sample_indices(nodes, node_position)
+	return nodes[i].heading + (nodes[next_i].heading - nodes[i].heading) * fraction
+}
+
+pitch_sample :: proc(nodes: []Track_Node, node_position: f32) -> f32 {
+	i, next_i, fraction := track_sample_indices(nodes, node_position)
+	return nodes[i].pitch + (nodes[next_i].pitch - nodes[i].pitch) * fraction
+}
+
+pace_sample :: proc(nodes: []Track_Node, node_position: f32) -> f32 {
+	i, next_i, fraction := track_sample_indices(nodes, node_position)
+	return nodes[i].pace + (nodes[next_i].pace - nodes[i].pace) * fraction
+}
+
 pitch_around :: proc(point: rl.Vector3, pivot_y, pitch: f32) -> rl.Vector3 {
 	c := f32(math.cos(f64(pitch)))
 	s := f32(math.sin(f64(pitch)))
 	dy := point.y - pivot_y
 	return {point.x, pivot_y + dy * c + point.z * s, point.z * c - dy * s}
+}
+
+lift_road_overlay :: proc(point: rl.Vector3, amount: f32) -> rl.Vector3 {
+	result := point
+	result.y += amount
+	return result
 }
 
 draw_ride :: proc(
@@ -924,15 +990,16 @@ draw_ride :: proc(
 	base_bank := road_bank(nodes, current) + (road_bank(nodes, next_i) - road_bank(nodes, current)) * fraction
 	shake_x := f32(math.sin(rl.GetTime() * 61)) * shake * 0.24
 	shake_y := f32(math.sin(rl.GetTime() * 47)) * shake * 0.18
-	pace := nodes[current].pace
+	playhead := f32(current) + fraction
+	pace := pace_sample(nodes, playhead)
 	pace_curve := pace * pace * (3 - 2 * pace)
-	near_i := min(current + 8, len(nodes) - 1)
-	far_i := min(current + 18 + int(pace * 8), len(nodes) - 1)
-	near_look := road_point(nodes, near_i, 0, base_x, base_y, base_z, base_heading)
-	far_look := road_point(nodes, far_i, 0, base_x, base_y, base_z, base_heading)
-	preview_i := min(current + 10, len(nodes) - 1)
-	future_heading := nodes[preview_i].heading
-	future_pitch := nodes[preview_i].pitch
+	near_position := playhead + 8
+	far_position := playhead + 18 + pace * 8
+	preview_position := playhead + 10
+	near_look := road_center_sample(nodes, near_position, base_x, base_y, base_z, base_heading)
+	far_look := road_center_sample(nodes, far_position, base_x, base_y, base_z, base_heading)
+	future_heading := heading_sample(nodes, preview_position)
+	future_pitch := pitch_sample(nodes, preview_position)
 	turn_preview := clamp(future_heading - base_heading, -0.7, 0.7)
 	pitch_preview := clamp(future_pitch - base_pitch, -0.45, 0.45)
 	camera_bank := clamp(turn_preview * 0.48 + steer_lean * 0.035, -0.29, 0.29)
@@ -991,10 +1058,20 @@ draw_ride :: proc(
 		}
 
 		grid_color := pace_color(node.pace, 0.58 + node.pace * 0.32, 105)
-		if i % 2 == 0 do rl.DrawLine3D(left, right, grid_color)
+		if i % 2 == 0 {
+			rl.DrawLine3D(
+				lift_road_overlay(left, 0.035),
+				lift_road_overlay(right, 0.035),
+				grid_color,
+			)
+		}
 		if node.beat > 0.22 {
 			beat_color := pace_color(node.pace, 1, u8(150 + node.beat * 100))
-			rl.DrawLine3D(left, right, beat_color)
+			rl.DrawLine3D(
+				lift_road_overlay(left, 0.075),
+				lift_road_overlay(right, 0.075),
+				beat_color,
+			)
 		}
 		rail_color := pace_color(node.pace, 0.78 + node.pace * 0.2, 245)
 		rl.DrawCylinderEx(left, next_left, 0.045 + node.pace * 0.025, 0.045, 5, rail_color)
@@ -1006,7 +1083,11 @@ draw_ride :: proc(
 				next_mark := f32(lane_mark) * nodes[i + 1].width / 3
 				p0 := road_point(nodes, i, mark, base_x, base_y, base_z, base_heading)
 				p1 := road_point(nodes, i + 1, next_mark, base_x, base_y, base_z, base_heading)
-				rl.DrawLine3D(p0, p1, rl.Color{205, 225, 255, 145})
+				rl.DrawLine3D(
+					lift_road_overlay(p0, 0.055),
+					lift_road_overlay(p1, 0.055),
+					rl.Color{205, 225, 255, 145},
+				)
 			}
 		}
 
