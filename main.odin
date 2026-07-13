@@ -9,7 +9,7 @@ import "core:strings"
 import rl "vendor:raylib"
 
 MAP_MAGIC :: u64(0x50535943484f3031) // PSYCHO01
-MAP_VERSION :: u32(8)
+MAP_VERSION :: u32(1)
 STEP :: f32(0.10)
 ROAD_STEP :: f32(5.5)
 
@@ -157,6 +157,111 @@ load_map :: proc(path: string) -> (nodes: []Track_Node, ok: bool) {
 	nodes = make([]Track_Node, int(header.count))
 	copy(mem.slice_to_bytes(nodes), data[size_of(Cache_Header):])
 	return nodes, true
+}
+
+closure_correction :: proc(value_delta, derivative_delta, u: f32) -> f32 {
+	u2 := u * u
+	u3 := u2 * u
+	// Cubic Hermite correction closes both value and first derivative at the seam.
+	return (-2 * u3 + 3 * u2) * value_delta + (u3 - u2) * derivative_delta
+}
+
+close_track_loop :: proc(nodes: []Track_Node) {
+	count := len(nodes)
+	if count < 4 do return
+	last_i := count - 1
+	first_distance := nodes[0].distance
+	raw_length := nodes[last_i].distance - first_distance
+	if raw_length <= 0.001 do return
+
+	first_u := clamp((nodes[1].distance - first_distance) / raw_length, 0.000001, 1)
+	last_u := clamp((nodes[last_i - 1].distance - first_distance) / raw_length, 0, 0.999999)
+	start_dxdu := (nodes[1].curve_x - nodes[0].curve_x) / first_u
+	end_dxdu := (nodes[last_i].curve_x - nodes[last_i - 1].curve_x) / (1 - last_u)
+	start_dydu := (nodes[1].curve_y - nodes[0].curve_y) / first_u
+	end_dydu := (nodes[last_i].curve_y - nodes[last_i - 1].curve_y) / (1 - last_u)
+	delta_x := nodes[last_i].curve_x - nodes[0].curve_x
+	delta_y := nodes[last_i].curve_y - nodes[0].curve_y
+
+	wrapped := make([]rl.Vector3, count)
+	defer delete(wrapped)
+	tau := f32(2 * math.PI)
+	// The three radial lobes produce broad curvature reversals while remaining a single,
+	// non-self-intersecting loop. The scale keeps its circumference close to the open ride.
+	loop_radius := max(24, raw_length / (tau * 1.08))
+	start_radius := loop_radius * 1.16
+	for i in 0 ..< count {
+		u := clamp((nodes[i].distance - first_distance) / raw_length, 0, 1)
+		theta := u * tau
+		raw_radial :=
+			nodes[i].curve_x - nodes[0].curve_x -
+			closure_correction(delta_x, end_dxdu - start_dxdu, u)
+		raw_height :=
+			nodes[i].curve_y - nodes[0].curve_y -
+			closure_correction(delta_y, end_dydu - start_dydu, u)
+		radial_music := clamp(raw_radial * 0.35, -loop_radius * 0.10, loop_radius * 0.10)
+		radius :=
+			loop_radius * (1 + 0.16 * f32(math.cos(f64(theta * 3)))) + radial_music
+		loop_height :=
+			loop_radius *
+			(0.055 * f32(math.sin(f64(theta))) - 0.028 * f32(math.sin(f64(theta * 2))))
+		music_height := clamp(raw_height * 1.15, -loop_radius * 0.28, loop_radius * 0.28)
+		wrapped[i] = {
+			start_radius - radius * f32(math.cos(f64(theta))),
+			loop_height + music_height,
+			radius * f32(math.sin(f64(theta))),
+		}
+	}
+	// Avoid a tiny floating-point crack from sin/cos(2*pi).
+	wrapped[last_i] = wrapped[0]
+	for i in 0 ..< count {
+		nodes[i].curve_x = wrapped[i].x
+		nodes[i].curve_y = wrapped[i].y
+		nodes[i].curve_z = wrapped[i].z
+	}
+
+	// Blend the final road width into the starting width so the physical strip also closes.
+	seam_nodes := min(16, max(2, count / 4))
+	for offset in 0 ..< seam_nodes {
+		i := last_i - offset
+		t := 1 - f32(offset) / f32(seam_nodes)
+		t = t * t * (3 - 2 * t)
+		nodes[i].width += (nodes[0].width - nodes[i].width) * t
+	}
+	nodes[last_i].width = nodes[0].width
+
+	// Rebuild true 3D arc length after wrapping.
+	nodes[0].distance = 0
+	distance: f32
+	for i in 1 ..< count {
+		dx := nodes[i].curve_x - nodes[i - 1].curve_x
+		dy := nodes[i].curve_y - nodes[i - 1].curve_y
+		dz := nodes[i].curve_z - nodes[i - 1].curve_z
+		distance += f32(math.sqrt(f64(dx * dx + dy * dy + dz * dz)))
+		nodes[i].distance = distance
+	}
+
+	// Cache outgoing tangents and unwrap yaw continuously through the full revolution.
+	previous_heading: f32
+	for i in 0 ..< last_i {
+		dx := nodes[i + 1].curve_x - nodes[i].curve_x
+		dy := nodes[i + 1].curve_y - nodes[i].curve_y
+		dz := nodes[i + 1].curve_z - nodes[i].curve_z
+		planar_step := f32(math.sqrt(f64(dx * dx + dz * dz)))
+		heading := f32(math.atan2(f64(dx), f64(dz)))
+		if i > 0 {
+			for heading - previous_heading > f32(math.PI) do heading -= tau
+			for heading - previous_heading < -f32(math.PI) do heading += tau
+		}
+		nodes[i].heading = heading
+		nodes[i].pitch = f32(math.atan2(f64(dy), f64(max(0.001, planar_step))))
+		previous_heading = heading
+	}
+	seam_heading := nodes[0].heading
+	for seam_heading - previous_heading > f32(math.PI) do seam_heading -= tau
+	for seam_heading - previous_heading < -f32(math.PI) do seam_heading += tau
+	nodes[last_i].heading = seam_heading
+	nodes[last_i].pitch = nodes[0].pitch
 }
 
 analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int) -> []Track_Node {
@@ -460,6 +565,7 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 		node.curve_x, node.curve_y, node.curve_z = center_x, center_y, center_z
 		node.heading, node.pitch, node.distance = heading, pitch, distance
 	}
+	close_track_loop(nodes)
 	return nodes
 }
 
@@ -686,6 +792,27 @@ self_test :: proc() {
 	assert(len(nodes) == 240)
 	assert(nodes[10].bass >= 0 && nodes[10].bass <= 1)
 	assert(nodes[90].distance - nodes[89].distance > nodes[20].distance - nodes[19].distance)
+	first, last := nodes[0], nodes[len(nodes) - 1]
+	closure_dx := last.curve_x - first.curve_x
+	closure_dy := last.curve_y - first.curve_y
+	closure_dz := last.curve_z - first.curve_z
+	closure_distance := f32(math.sqrt(f64(
+		closure_dx * closure_dx + closure_dy * closure_dy + closure_dz * closure_dz,
+	)))
+	seam_heading_error := abs(f32(math.sin(f64(nodes[len(nodes) - 2].heading - first.heading))))
+	seam_pitch_error := abs(nodes[len(nodes) - 2].pitch - first.pitch)
+	seam_bank_error := abs(road_bank(nodes, len(nodes) - 1) - road_bank(nodes, 0))
+	fmt.printfln(
+		"self-test: loop closure %.3f; seam heading %.2f° pitch %.2f° bank %.2f°",
+		closure_distance,
+		f64(seam_heading_error) * 180 / math.PI,
+		f64(seam_pitch_error) * 180 / math.PI,
+		f64(seam_bank_error) * 180 / math.PI,
+	)
+	assert(closure_distance < 0.01, "the final cached road point must return to the start")
+	assert(seam_heading_error < 0.04 && seam_pitch_error < 0.04, "the loop seam must preserve its tangent")
+	assert(seam_bank_error < 0.08, "the loop seam must preserve road banking")
+	assert(abs(last.width - first.width) < 0.001, "the loop seam must preserve road width")
 	pickups, hazards, features: int
 	sections: bit_set[0 ..< 4]
 	for node in nodes {
@@ -696,40 +823,43 @@ self_test :: proc() {
 	}
 	min_x, max_x := nodes[0].curve_x, nodes[0].curve_x
 	min_y, max_y := nodes[0].curve_y, nodes[0].curve_y
-	min_heading, max_heading, min_pitch, max_pitch: f32
+	min_turn, max_turn, min_pitch, max_pitch: f32
 	for node in nodes {
 		min_x, max_x = min(min_x, node.curve_x), max(max_x, node.curve_x)
 		min_y, max_y = min(min_y, node.curve_y), max(max_y, node.curve_y)
 	}
-	for i in 1 ..< len(nodes) {
-		dx := nodes[i].curve_x - nodes[i - 1].curve_x
-		dy := nodes[i].curve_y - nodes[i - 1].curve_y
-		dz := nodes[i].curve_z - nodes[i - 1].curve_z
-		heading := f32(math.atan2(f64(dx), f64(max(0.001, dz))))
+	for i in 0 ..< len(nodes) - 1 {
+		dx := nodes[i + 1].curve_x - nodes[i].curve_x
+		dy := nodes[i + 1].curve_y - nodes[i].curve_y
+		dz := nodes[i + 1].curve_z - nodes[i].curve_z
+		heading := f32(math.atan2(f64(dx), f64(dz)))
 		planar_step := f32(math.sqrt(f64(dx * dx + dz * dz)))
 		pitch := f32(math.atan2(f64(dy), f64(max(0.001, planar_step))))
 		spatial_step := f32(math.sqrt(f64(dx * dx + dy * dy + dz * dz)))
-		arc_step := nodes[i].distance - nodes[i - 1].distance
-		assert(dz > 0, "cached centerline must always move forward")
+		arc_step := nodes[i + 1].distance - nodes[i].distance
+		assert(spatial_step > 0.01, "closed centerline segments must not collapse")
 		assert(abs(spatial_step - arc_step) < 0.01, "cached distance must match 3D centerline arc length")
-		assert(abs(heading - nodes[i].heading) < 0.001, "cached heading must match centerline tangent")
+		assert(abs(f32(math.sin(f64(heading - nodes[i].heading)))) < 0.001, "cached heading must match centerline tangent")
 		assert(abs(pitch - nodes[i].pitch) < 0.001, "cached pitch must match centerline tangent")
-		min_heading = min(min_heading, heading)
-		max_heading = max(max_heading, heading)
+		if i > 0 {
+			turn := nodes[i].heading - nodes[i - 1].heading
+			min_turn = min(min_turn, turn)
+			max_turn = max(max_turn, turn)
+		}
 		min_pitch = min(min_pitch, pitch)
 		max_pitch = max(max_pitch, pitch)
 	}
 	fmt.printfln(
-		"self-test: centerline yaw %.1f° left / %.1f° right; pitch %.1f° up / %.1f° down",
-		f64(max_heading) * 180 / math.PI,
-		f64(min_heading) * 180 / math.PI,
+		"self-test: local turn %.1f° left / %.1f° right; pitch %.1f° up / %.1f° down",
+		f64(max_turn) * 180 / math.PI,
+		f64(min_turn) * 180 / math.PI,
 		f64(max_pitch) * 180 / math.PI,
 		f64(min_pitch) * 180 / math.PI,
 	)
 	assert(pickups > 0 && hazards > 0)
 	assert(card(sections) == 4)
 	assert(max_x - min_x > 16 && max_y - min_y > 18 && features > 4)
-	assert(max_heading > 0.24 && min_heading < -0.24, "road must make visible turns both ways")
+	assert(max_turn > 0.004 && min_turn < -0.004, "closed road must curve both ways")
 	assert(max_pitch > 0.10 && min_pitch < -0.10, "road must make visible climbs and drops")
 	probe_i := len(nodes) / 2
 	probe := nodes[probe_i]

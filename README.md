@@ -15,9 +15,11 @@ length, and palette heat: calm music climbs slowly in cool colors, while
 busy/intense music crests into a hot, fast descent. The HUD profile previews the
 whole rollercoaster and marks the live song position. Its second view shows the
 entire cached route from above. The cache stores a true 3D centerline and
-heading, so road edges, traffic, banking, and the chase camera follow sweeping
-left/right turns instead of skewing a straight strip. Movement labels control
-turn style and visual character, never override the rhythm.
+heading/pitch, so road edges, traffic, banking, and the chase camera follow
+sweeping left/right turns instead of skewing a straight strip. Each song is one
+closed lap: the final cached position and tangent reconnect to the exact start,
+then playback finishes normally. Movement labels control turn style and visual
+character, never override the rhythm.
 
 ```sh
 odin build . -out:psycho
