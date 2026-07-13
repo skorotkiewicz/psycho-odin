@@ -5,11 +5,13 @@ import "core:hash"
 import "core:math"
 import "core:mem"
 import "core:os"
+import "core:strconv"
 import "core:strings"
+import "core:time"
 import rl "vendor:raylib"
 
 MAP_MAGIC :: u64(0x50535943484f3031) // PSYCHO01
-MAP_VERSION :: u32(1)
+MAP_VERSION :: u32(10)
 STEP :: f32(0.10)
 ROAD_STEP :: f32(5.5)
 
@@ -72,6 +74,128 @@ Track_Node :: struct {
 Cache_Header :: struct {
 	magic:          u64,
 	version, count: u32,
+}
+
+Game_Config :: struct {
+	mouse_response:    f32,
+	music_volume:      f32,
+	visual_strength:   f32,
+	audio_fx_strength: f32,
+	visual_fx:         bool,
+	audio_fx:          bool,
+	hide_cursor:       bool,
+}
+
+RESULTS_PATH :: ".games/results.tsv"
+
+default_game_config :: proc() -> Game_Config {
+	return {
+		mouse_response = 26,
+		music_volume = 0.65,
+		visual_strength = 0.65,
+		audio_fx_strength = 0.22,
+		visual_fx = true,
+		audio_fx = false,
+		hide_cursor = true,
+	}
+}
+
+parse_game_config :: proc(text: string) -> Game_Config {
+	config := default_game_config()
+	remaining := text
+	for raw_line in strings.split_lines_iterator(&remaining) {
+		line := strings.trim_space(raw_line)
+		if len(line) == 0 || line[0] == '#' || line[0] == '[' do continue
+		if comment_at := strings.index_byte(line, '#'); comment_at >= 0 {
+			line = strings.trim_space(line[:comment_at])
+		}
+		equals_at := strings.index_byte(line, '=')
+		if equals_at <= 0 do continue
+		key := strings.trim_space(line[:equals_at])
+		value := strings.trim_space(line[equals_at + 1:])
+		switch key {
+		case "mouse_response":
+			if parsed, ok := strconv.parse_f32(value); ok do config.mouse_response = parsed
+		case "music_volume":
+			if parsed, ok := strconv.parse_f32(value); ok do config.music_volume = parsed
+		case "visual_strength":
+			if parsed, ok := strconv.parse_f32(value); ok do config.visual_strength = parsed
+		case "audio_fx_strength":
+			if parsed, ok := strconv.parse_f32(value); ok do config.audio_fx_strength = parsed
+		case "visual_fx":
+			if parsed, ok := strconv.parse_bool(value); ok do config.visual_fx = parsed
+		case "audio_fx":
+			if parsed, ok := strconv.parse_bool(value); ok do config.audio_fx = parsed
+		case "hide_cursor":
+			if parsed, ok := strconv.parse_bool(value); ok do config.hide_cursor = parsed
+		}
+	}
+	config.mouse_response = clamp(config.mouse_response, 8, 60)
+	config.music_volume = clamp(config.music_volume, 0, 0.8)
+	config.visual_strength = clamp(config.visual_strength, 0, 1)
+	config.audio_fx_strength = clamp(config.audio_fx_strength, 0, 0.5)
+	return config
+}
+
+load_game_config :: proc(path: string) -> Game_Config {
+	data, err := os.read_entire_file(path, context.allocator)
+	if err != nil do return default_game_config()
+	defer delete(data)
+	return parse_game_config(transmute(string)data)
+}
+
+format_game_result :: proc(
+	completed_unix: i64,
+	song: string,
+	score, best_streak, crashes: int,
+	duration_seconds: f32,
+) -> string {
+	return fmt.aprintf(
+		"%d\t%q\t%d\t%d\t%d\t%.2f\n",
+		completed_unix,
+		song,
+		score,
+		best_streak,
+		crashes,
+		duration_seconds,
+	)
+}
+
+save_game_result :: proc(
+	song: string,
+	score, best_streak, crashes: int,
+	duration_seconds: f32,
+) -> bool {
+	if err := os.make_directory_all(".games"); err != nil && err != .Exist do return false
+	file, err := os.open(RESULTS_PATH, {.Write, .Append, .Create}, os.Permissions_Default_File)
+	if err != nil do return false
+	existing_size, size_err := os.file_size(file)
+	if size_err != nil {
+		_ = os.close(file)
+		return false
+	}
+	if existing_size == 0 {
+		_, err = os.write_string(
+			file,
+			"completed_unix\tsong\tscore\tbest_streak\tcrashes\tduration_seconds\n",
+		)
+		if err != nil {
+			_ = os.close(file)
+			return false
+		}
+	}
+	line := format_game_result(
+		time.to_unix_seconds(time.now()),
+		song,
+		score,
+		best_streak,
+		crashes,
+		duration_seconds,
+	)
+	defer delete(line)
+	_, write_err := os.write_string(file, line)
+	close_err := os.close(file)
+	return write_err == nil && close_err == nil
 }
 
 // Audio-thread state. The effect is optional because binaural/ASMR responses vary by listener.
@@ -194,14 +318,15 @@ close_track_loop :: proc(nodes: []Track_Node) {
 		u := clamp((nodes[i].distance - first_distance) / raw_length, 0, 1)
 		theta := u * tau
 		raw_radial :=
-			nodes[i].curve_x - nodes[0].curve_x -
+			nodes[i].curve_x -
+			nodes[0].curve_x -
 			closure_correction(delta_x, end_dxdu - start_dxdu, u)
 		raw_height :=
-			nodes[i].curve_y - nodes[0].curve_y -
+			nodes[i].curve_y -
+			nodes[0].curve_y -
 			closure_correction(delta_y, end_dydu - start_dydu, u)
 		radial_music := clamp(raw_radial * 0.35, -loop_radius * 0.10, loop_radius * 0.10)
-		radius :=
-			loop_radius * (1 + 0.16 * f32(math.cos(f64(theta * 3)))) + radial_music
+		radius := loop_radius * (1 + 0.16 * f32(math.cos(f64(theta * 3)))) + radial_music
 		loop_height :=
 			loop_radius *
 			(0.055 * f32(math.sin(f64(theta))) - 0.028 * f32(math.sin(f64(theta * 2))))
@@ -384,8 +509,10 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 	for node_i in 0 ..< count {
 		previous_flux := nodes[max(0, node_i - 1)].onset
 		next_flux := nodes[min(count - 1, node_i + 1)].onset
-		if node_i > 3 && node_i - last_beat > 2 &&
-		   nodes[node_i].onset >= 0.24 && nodes[node_i].onset >= previous_flux &&
+		if node_i > 3 &&
+		   node_i - last_beat > 2 &&
+		   nodes[node_i].onset >= 0.24 &&
+		   nodes[node_i].onset >= previous_flux &&
 		   nodes[node_i].onset >= next_flux {
 			nodes[node_i].beat = nodes[node_i].onset
 			nodes[node_i].kind = PICKUP
@@ -425,8 +552,11 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 		nodes[node_i].activity = clamp(activity * 2.8, 0, 1)
 		bpm_normalized := clamp((600 / f32(best_lag) - 60) / 140, 0, 1)
 		confidence := clamp((best_score - 0.16) / 0.55, 0, 1)
-		nodes[node_i].tempo =
-			clamp(bpm_normalized * confidence + nodes[node_i].activity * 0.16, 0, 1)
+		nodes[node_i].tempo = clamp(
+			bpm_normalized * confidence + nodes[node_i].activity * 0.16,
+			0,
+			1,
+		)
 	}
 
 	// Offline look-around lets the road crest just before a musical drop instead of lagging it.
@@ -594,9 +724,13 @@ mouse_lane_target :: proc(mouse_x, screen_width: i32) -> f32 {
 	return clamp((center - f32(mouse_x)) / half_control_width, -1, 1)
 }
 
-smooth_mouse_lane :: proc(current, target, dt: f32) -> f32 {
-	response := 1 - f32(math.exp(f64(-18 * max(0, dt))))
+smooth_mouse_lane :: proc(current, target, dt: f32, response_rate: f32 = 26) -> f32 {
+	response := 1 - f32(math.exp(f64(-response_rate * max(0, dt))))
 	return clamp(current + (target - current) * response, -1, 1)
+}
+
+ride_finished :: proc(paused, playback_seen, music_playing: bool) -> bool {
+	return !paused && playback_seen && !music_playing
 }
 
 lane_position :: proc(road_width, normalized_lane: f32) -> f32 {
@@ -659,8 +793,10 @@ calculate_course_map_bounds :: proc(nodes: []Track_Node) -> Course_Map_Bounds {
 	for node in nodes {
 		bounds.min_height = min(bounds.min_height, node.curve_y)
 		bounds.max_height = max(bounds.max_height, node.curve_y)
-		bounds.min_x, bounds.max_x = min(bounds.min_x, node.curve_x), max(bounds.max_x, node.curve_x)
-		bounds.min_z, bounds.max_z = min(bounds.min_z, node.curve_z), max(bounds.max_z, node.curve_z)
+		bounds.min_x, bounds.max_x =
+			min(bounds.min_x, node.curve_x), max(bounds.max_x, node.curve_x)
+		bounds.min_z, bounds.max_z =
+			min(bounds.min_z, node.curve_z), max(bounds.max_z, node.curve_z)
 	}
 	return bounds
 }
@@ -796,10 +932,12 @@ self_test :: proc() {
 	closure_dx := last.curve_x - first.curve_x
 	closure_dy := last.curve_y - first.curve_y
 	closure_dz := last.curve_z - first.curve_z
-	closure_distance := f32(math.sqrt(f64(
-		closure_dx * closure_dx + closure_dy * closure_dy + closure_dz * closure_dz,
-	)))
-	seam_heading_error := abs(f32(math.sin(f64(nodes[len(nodes) - 2].heading - first.heading))))
+	closure_distance := f32(
+		math.sqrt(
+			f64(closure_dx * closure_dx + closure_dy * closure_dy + closure_dz * closure_dz),
+		),
+	)
+	seam_heading_error := abs(wrapped_angle_delta(nodes[len(nodes) - 2].heading, first.heading))
 	seam_pitch_error := abs(nodes[len(nodes) - 2].pitch - first.pitch)
 	seam_bank_error := abs(road_bank(nodes, len(nodes) - 1) - road_bank(nodes, 0))
 	fmt.printfln(
@@ -810,7 +948,10 @@ self_test :: proc() {
 		f64(seam_bank_error) * 180 / math.PI,
 	)
 	assert(closure_distance < 0.01, "the final cached road point must return to the start")
-	assert(seam_heading_error < 0.04 && seam_pitch_error < 0.04, "the loop seam must preserve its tangent")
+	assert(
+		seam_heading_error < 0.04 && seam_pitch_error < 0.04,
+		"the loop seam must preserve its tangent",
+	)
 	assert(seam_bank_error < 0.08, "the loop seam must preserve road banking")
 	assert(abs(last.width - first.width) < 0.001, "the loop seam must preserve road width")
 	pickups, hazards, features: int
@@ -838,8 +979,14 @@ self_test :: proc() {
 		spatial_step := f32(math.sqrt(f64(dx * dx + dy * dy + dz * dz)))
 		arc_step := nodes[i + 1].distance - nodes[i].distance
 		assert(spatial_step > 0.01, "closed centerline segments must not collapse")
-		assert(abs(spatial_step - arc_step) < 0.01, "cached distance must match 3D centerline arc length")
-		assert(abs(f32(math.sin(f64(heading - nodes[i].heading)))) < 0.001, "cached heading must match centerline tangent")
+		assert(
+			abs(spatial_step - arc_step) < 0.01,
+			"cached distance must match 3D centerline arc length",
+		)
+		assert(
+			abs(wrapped_angle_delta(heading, nodes[i].heading)) < 0.001,
+			"cached heading must match centerline tangent",
+		)
 		assert(abs(pitch - nodes[i].pitch) < 0.001, "cached pitch must match centerline tangent")
 		if i > 0 {
 			turn := nodes[i].heading - nodes[i - 1].heading
@@ -893,7 +1040,10 @@ self_test :: proc() {
 		probe.curve_z,
 		probe.heading,
 	)
-	assert(future_center.z > 1, "future cached centerline must remain ahead in the local tangent frame")
+	assert(
+		future_center.z > 1,
+		"future cached centerline must remain ahead in the local tangent frame",
+	)
 	assert(abs(future_center.x) > 0.1, "future tangent transform must expose the upcoming bend")
 	sample_boundary := f32(probe_i + 10)
 	preview_before := road_center_sample(
@@ -915,16 +1065,76 @@ self_test :: proc() {
 	preview_dx := preview_after.x - preview_before.x
 	preview_dy := preview_after.y - preview_before.y
 	preview_dz := preview_after.z - preview_before.z
-	preview_jump := f32(math.sqrt(f64(preview_dx * preview_dx + preview_dy * preview_dy + preview_dz * preview_dz)))
+	preview_jump := f32(
+		math.sqrt(
+			f64(preview_dx * preview_dx + preview_dy * preview_dy + preview_dz * preview_dz),
+		),
+	)
 	fmt.printfln("self-test: camera preview cache-boundary jump %.3f", preview_jump)
 	assert(preview_jump < 0.10, "camera preview must move continuously across cached audio slices")
+	loop_span := f32(len(nodes) - 1)
+	seam_preview_before := road_center_sample(
+		nodes,
+		loop_span - 0.001,
+		first.curve_x,
+		first.curve_y,
+		first.curve_z,
+		first.heading,
+	)
+	seam_preview_after := road_center_sample(
+		nodes,
+		loop_span + 0.001,
+		first.curve_x,
+		first.curve_y,
+		first.curve_z,
+		first.heading,
+	)
+	seam_preview_dx := seam_preview_after.x - seam_preview_before.x
+	seam_preview_dy := seam_preview_after.y - seam_preview_before.y
+	seam_preview_dz := seam_preview_after.z - seam_preview_before.z
+	seam_preview_jump := f32(
+		math.sqrt(
+			f64(
+				seam_preview_dx * seam_preview_dx +
+				seam_preview_dy * seam_preview_dy +
+				seam_preview_dz * seam_preview_dz,
+			),
+		),
+	)
+	fmt.printfln("self-test: camera loop-seam jump %.3f", seam_preview_jump)
+	assert(seam_preview_jump < 0.10, "camera preview must continue through the loop seam")
 	assert(abs(lane_position(4.8, 1) - 3.2) < 0.001)
 	assert(steer_input(true, false) > 0, "A/left must move toward screen-left for a +Z camera")
 	assert(mouse_lane_target(0, 1000) > 0.99)
 	assert(abs(mouse_lane_target(500, 1000)) < 0.001)
 	assert(mouse_lane_target(1000, 1000) < -0.99)
 	mouse_step := smooth_mouse_lane(0, 1, 1.0 / 60.0)
-	assert(mouse_step > 0 && mouse_step < 1)
+	assert(
+		mouse_step > 0.32 && mouse_step < 1,
+		"default mouse response must be quicker than the alpha build",
+	)
+	assert(!ride_finished(false, false, false), "a ride cannot finish before playback starts")
+	assert(!ride_finished(true, true, false), "pausing must not finish a ride")
+	assert(
+		ride_finished(false, true, false),
+		"stopped playback must finish even if the final sample was skipped",
+	)
+	config_test := parse_game_config(
+		`
+mouse_response = 31.0
+hide_cursor = false
+music_volume = 2.0 # must clamp
+visual_fx = false
+audio_fx_strength = 0.33
+`,
+	)
+	assert(abs(config_test.mouse_response - 31) < 0.001)
+	assert(!config_test.hide_cursor && !config_test.visual_fx)
+	assert(abs(config_test.music_volume - 0.8) < 0.001)
+	assert(abs(config_test.audio_fx_strength - 0.33) < 0.001)
+	result_test := format_game_result(123, "music/test.wav", 4567, 12, 3, 98.5)
+	assert(strings.contains(result_test, "\t4567\t12\t3\t98.50"))
+	delete(result_test)
 
 	// Multi-second musical dynamics must produce opposite grades and visibly different speeds.
 	rhythm_samples := make([]f32, rate * 24)
@@ -962,7 +1172,9 @@ self_test :: proc() {
 		loud_slope,
 		loud_speed,
 	)
-	quiet_run := f32(math.sqrt(f64(max(0.001, quiet_speed * quiet_speed - quiet_slope * quiet_slope))))
+	quiet_run := f32(
+		math.sqrt(f64(max(0.001, quiet_speed * quiet_speed - quiet_slope * quiet_slope))),
+	)
 	loud_run := f32(math.sqrt(f64(max(0.001, loud_speed * loud_speed - loud_slope * loud_slope))))
 	quiet_angle := f32(math.atan2(f64(quiet_slope), f64(quiet_run)))
 	loud_angle := f32(math.atan2(f64(loud_slope), f64(loud_run)))
@@ -973,7 +1185,10 @@ self_test :: proc() {
 	)
 	assert(quiet_slope > 0.12 && loud_slope < -0.12)
 	assert(loud_speed > quiet_speed * 1.8)
-	assert(quiet_angle > 0.10 && loud_angle < -0.10, "climbs and drops must remain visible at speed")
+	assert(
+		quiet_angle > 0.10 && loud_angle < -0.10,
+		"climbs and drops must remain visible at speed",
+	)
 
 	// Beat periodicity affects pace even when the average amplitude stays similar.
 	tempo_samples := make([]f32, rate * 28)
@@ -1029,9 +1244,34 @@ self_test :: proc() {
 
 road_bank :: proc(nodes: []Track_Node, i: int) -> f32 {
 	node_i := clamp(i, 0, len(nodes) - 1)
+	if len(nodes) < 3 do return 0
+	if track_is_closed(nodes) && (node_i == 0 || node_i == len(nodes) - 1) {
+		reference := nodes[node_i].heading
+		previous_heading := unwrap_angle_near(nodes[len(nodes) - 2].heading, reference)
+		next_heading := unwrap_angle_near(nodes[1].heading, reference)
+		return clamp((next_heading - previous_heading) * 3.6, -0.68, 0.68)
+	}
 	previous := nodes[max(0, node_i - 1)]
 	next := nodes[min(len(nodes) - 1, node_i + 1)]
 	return clamp((next.heading - previous.heading) * 3.6, -0.68, 0.68)
+}
+
+track_is_closed :: proc(nodes: []Track_Node) -> bool {
+	if len(nodes) < 2 do return false
+	first, last := nodes[0], nodes[len(nodes) - 1]
+	dx := last.curve_x - first.curve_x
+	dy := last.curve_y - first.curve_y
+	dz := last.curve_z - first.curve_z
+	return dx * dx + dy * dy + dz * dz < 0.0001
+}
+
+wrapped_angle_delta :: proc(angle, reference: f32) -> f32 {
+	delta := angle - reference
+	return f32(math.atan2(f64(math.sin(f64(delta))), f64(math.cos(f64(delta)))))
+}
+
+unwrap_angle_near :: proc(angle, reference: f32) -> f32 {
+	return reference + wrapped_angle_delta(angle, reference)
 }
 
 road_point :: proc(
@@ -1055,10 +1295,24 @@ road_point :: proc(
 	}
 }
 
-track_sample_indices :: proc(nodes: []Track_Node, node_position: f32) -> (i, next_i: int, fraction: f32) {
-	position := clamp(node_position, 0, f32(len(nodes) - 1))
+track_sample_indices :: proc(
+	nodes: []Track_Node,
+	node_position: f32,
+) -> (
+	i, next_i: int,
+	fraction: f32,
+) {
+	position := node_position
+	if track_is_closed(nodes) {
+		span := f32(len(nodes) - 1)
+		for position > span do position -= span
+		for position < 0 do position += span
+	} else {
+		position = clamp(position, 0, f32(len(nodes) - 1))
+	}
 	i = int(position)
 	next_i = min(i + 1, len(nodes) - 1)
+	if track_is_closed(nodes) && i == len(nodes) - 1 do next_i = min(1, len(nodes) - 1)
 	fraction = position - f32(i)
 	return
 }
@@ -1114,10 +1368,13 @@ draw_ride :: proc(
 	base_x := nodes[current].curve_x + (nodes[next_i].curve_x - nodes[current].curve_x) * fraction
 	base_y := nodes[current].curve_y + (nodes[next_i].curve_y - nodes[current].curve_y) * fraction
 	base_z := nodes[current].curve_z + (nodes[next_i].curve_z - nodes[current].curve_z) * fraction
-	base_heading := nodes[current].heading + (nodes[next_i].heading - nodes[current].heading) * fraction
+	base_heading :=
+		nodes[current].heading + (nodes[next_i].heading - nodes[current].heading) * fraction
 	base_pitch := nodes[current].pitch + (nodes[next_i].pitch - nodes[current].pitch) * fraction
 	base_width := nodes[current].width + (nodes[next_i].width - nodes[current].width) * fraction
-	base_bank := road_bank(nodes, current) + (road_bank(nodes, next_i) - road_bank(nodes, current)) * fraction
+	base_bank :=
+		road_bank(nodes, current) +
+		(road_bank(nodes, next_i) - road_bank(nodes, current)) * fraction
 	shake_x := f32(math.sin(rl.GetTime() * 61)) * shake * 0.24
 	shake_y := f32(math.sin(rl.GetTime() * 47)) * shake * 0.18
 	playhead := f32(current) + fraction
@@ -1128,7 +1385,7 @@ draw_ride :: proc(
 	preview_position := playhead + 10
 	near_look := road_center_sample(nodes, near_position, base_x, base_y, base_z, base_heading)
 	far_look := road_center_sample(nodes, far_position, base_x, base_y, base_z, base_heading)
-	future_heading := heading_sample(nodes, preview_position)
+	future_heading := unwrap_angle_near(heading_sample(nodes, preview_position), base_heading)
 	future_pitch := pitch_sample(nodes, preview_position)
 	turn_preview := clamp(future_heading - base_heading, -0.7, 0.7)
 	pitch_preview := clamp(future_pitch - base_pitch, -0.45, 0.45)
@@ -1154,12 +1411,36 @@ draw_ride :: proc(
 	}
 	rl.BeginMode3D(camera)
 
-	for i := current; i < min(len(nodes) - 1, current + 100); i += 1 {
+	closed_track := track_is_closed(nodes)
+	unique_nodes := len(nodes)
+	if closed_track do unique_nodes -= 1
+	visible_segments := min(100, max(0, len(nodes) - 1 - current))
+	if closed_track do visible_segments = min(100, unique_nodes)
+	for segment in 0 ..< visible_segments {
+		i := current + segment
+		if closed_track do i %= unique_nodes
+		road_next := i + 1
 		node := nodes[i]
 		left := road_point(nodes, i, -node.width, base_x, base_y, base_z, base_heading)
 		right := road_point(nodes, i, node.width, base_x, base_y, base_z, base_heading)
-		next_left := road_point(nodes, i + 1, -nodes[i + 1].width, base_x, base_y, base_z, base_heading)
-		next_right := road_point(nodes, i + 1, nodes[i + 1].width, base_x, base_y, base_z, base_heading)
+		next_left := road_point(
+			nodes,
+			road_next,
+			-nodes[road_next].width,
+			base_x,
+			base_y,
+			base_z,
+			base_heading,
+		)
+		next_right := road_point(
+			nodes,
+			road_next,
+			nodes[road_next].width,
+			base_x,
+			base_y,
+			base_z,
+			base_heading,
+		)
 		center := road_point(nodes, i, 0, base_x, base_y, base_z, base_heading)
 		surface_value := clamp(
 			0.19 + node.pace * 0.28 + node.energy * 0.28 + node.mid * 0.20,
@@ -1171,15 +1452,45 @@ draw_ride :: proc(
 			near_left_offset := -node.width + f32(lane_i) * node.width * 2 / 3
 			near_right_offset := -node.width + f32(lane_i + 1) * node.width * 2 / 3
 			far_left_offset :=
-				-nodes[i + 1].width + f32(lane_i) * nodes[i + 1].width * 2 / 3
+				-nodes[road_next].width + f32(lane_i) * nodes[road_next].width * 2 / 3
 			far_right_offset :=
-				-nodes[i + 1].width + f32(lane_i + 1) * nodes[i + 1].width * 2 / 3
-			lane_left := road_point(nodes, i, near_left_offset, base_x, base_y, base_z, base_heading)
-			lane_right := road_point(nodes, i, near_right_offset, base_x, base_y, base_z, base_heading)
-			lane_next_left :=
-				road_point(nodes, i + 1, far_left_offset, base_x, base_y, base_z, base_heading)
-			lane_next_right :=
-				road_point(nodes, i + 1, far_right_offset, base_x, base_y, base_z, base_heading)
+				-nodes[road_next].width + f32(lane_i + 1) * nodes[road_next].width * 2 / 3
+			lane_left := road_point(
+				nodes,
+				i,
+				near_left_offset,
+				base_x,
+				base_y,
+				base_z,
+				base_heading,
+			)
+			lane_right := road_point(
+				nodes,
+				i,
+				near_right_offset,
+				base_x,
+				base_y,
+				base_z,
+				base_heading,
+			)
+			lane_next_left := road_point(
+				nodes,
+				road_next,
+				far_left_offset,
+				base_x,
+				base_y,
+				base_z,
+				base_heading,
+			)
+			lane_next_right := road_point(
+				nodes,
+				road_next,
+				far_right_offset,
+				base_x,
+				base_y,
+				base_z,
+				base_heading,
+			)
 			lane_lift: f32
 			if lane_i == 1 do lane_lift = 0.045
 			lane_color := pace_color(node.pace, surface_value + lane_lift, 225)
@@ -1210,9 +1521,9 @@ draw_ride :: proc(
 			for lane_mark in -1 ..= 1 {
 				if lane_mark == 0 do continue
 				mark := f32(lane_mark) * node.width / 3
-				next_mark := f32(lane_mark) * nodes[i + 1].width / 3
+				next_mark := f32(lane_mark) * nodes[road_next].width / 3
 				p0 := road_point(nodes, i, mark, base_x, base_y, base_z, base_heading)
-				p1 := road_point(nodes, i + 1, next_mark, base_x, base_y, base_z, base_heading)
+				p1 := road_point(nodes, road_next, next_mark, base_x, base_y, base_z, base_heading)
 				rl.DrawLine3D(
 					lift_road_overlay(p0, 0.055),
 					lift_road_overlay(p1, 0.055),
@@ -1221,7 +1532,7 @@ draw_ride :: proc(
 			}
 		}
 
-		if node.kind != 0 && i > current + 1 {
+		if node.kind != 0 && segment > 1 {
 			object := road_point(
 				nodes,
 				i,
@@ -1276,20 +1587,8 @@ draw_ride :: proc(
 		}
 		if node.section == DROP && i % 7 == 0 {
 			tower_color := pace_color(node.pace, 0.38 + node.energy * 0.36, 180)
-			rl.DrawCube(
-				{left.x - 2.5, left.y - 3.5, center.z},
-				1.2,
-				7,
-				1.2,
-				tower_color,
-			)
-			rl.DrawCube(
-				{right.x + 2.5, right.y - 3.5, center.z},
-				1.2,
-				7,
-				1.2,
-				tower_color,
-			)
+			rl.DrawCube({left.x - 2.5, left.y - 3.5, center.z}, 1.2, 7, 1.2, tower_color)
+			rl.DrawCube({right.x + 2.5, right.y - 3.5, center.z}, 1.2, 7, 1.2, tower_color)
 		}
 		if i % 6 == 0 {
 			panel_height := 1.5 + node.energy * 3.5 + node.pace * 1.8
@@ -1332,39 +1631,17 @@ draw_ride :: proc(
 		alpha := u8(max(7, 125 / trail))
 		trail_color := pace_color(pace, 1, alpha)
 		trail_point := pitch_around(
-			{
-				ship_x + steer_lean * f32(trail) * 0.018,
-				ship_y,
-				-f32(trail) * (0.52 + pace * 0.28),
-			},
+			{ship_x + steer_lean * f32(trail) * 0.018, ship_y, -f32(trail) * (0.52 + pace * 0.28)},
 			ship_y,
 			base_pitch,
 		)
-		rl.DrawSphere(
-			trail_point,
-			0.29 / f32(trail) + 0.05,
-			trail_color,
-		)
+		rl.DrawSphere(trail_point, 0.29 / f32(trail) + 0.05, trail_color)
 	}
 	wing_tilt := steer_lean * 0.24
 	body_back := pitch_around({ship_x, ship_y, -0.45}, ship_y, base_pitch)
 	body_front := pitch_around({ship_x, ship_y, 2.0}, ship_y, base_pitch)
-	rl.DrawCylinderEx(
-		body_back,
-		body_front,
-		0.56,
-		0.08,
-		8,
-		pace_color(pace, 0.46),
-	)
-	rl.DrawCylinderWiresEx(
-		body_back,
-		body_front,
-		0.56,
-		0.08,
-		8,
-		rl.Color{235, 245, 255, 230},
-	)
+	rl.DrawCylinderEx(body_back, body_front, 0.56, 0.08, 8, pace_color(pace, 0.46))
+	rl.DrawCylinderWiresEx(body_back, body_front, 0.56, 0.08, 8, rl.Color{235, 245, 255, 230})
 	ship_nose := pitch_around({ship_x, ship_y, 1.22}, ship_y, base_pitch)
 	ship_center := pitch_around({ship_x, ship_y, 0.02}, ship_y, base_pitch)
 	ship_left := pitch_around(
@@ -1377,32 +1654,15 @@ draw_ride :: proc(
 		ship_y,
 		base_pitch,
 	)
-	rl.DrawTriangle3D(
-		ship_nose,
-		ship_left,
-		ship_center,
-		ship_color,
-	)
-	rl.DrawTriangle3D(
-		ship_nose,
-		ship_center,
-		ship_right,
-		ship_color,
-	)
+	rl.DrawTriangle3D(ship_nose, ship_left, ship_center, ship_color)
+	rl.DrawTriangle3D(ship_nose, ship_center, ship_right, ship_color)
 	for side in -1 ..= 1 {
 		if side == 0 do continue
 		pod_x := ship_x + f32(side) * 0.55
 		pod_y := ship_y - f32(side) * (base_bank * 0.55 + wing_tilt * 0.35)
 		pod_back := pitch_around({pod_x, pod_y, -0.46}, ship_y, base_pitch)
 		pod_front := pitch_around({pod_x, pod_y, 0.72}, ship_y, base_pitch)
-		rl.DrawCylinderEx(
-			pod_back,
-			pod_front,
-			0.24,
-			0.13,
-			7,
-			pace_color(pace, 0.72),
-		)
+		rl.DrawCylinderEx(pod_back, pod_front, 0.24, 0.13, 7, pace_color(pace, 0.72))
 		rl.DrawSphere(pod_back, 0.22 + pace * 0.07, rl.WHITE)
 	}
 	cockpit := pitch_around({ship_x, ship_y + 0.24, 0.30}, ship_y, base_pitch)
@@ -1481,11 +1741,21 @@ main :: proc() {
 		fmt.println("map: analysis complete")
 		return
 	}
+	config := load_game_config("config.toml")
 	map_bounds := calculate_course_map_bounds(nodes)
 
 	rl.SetConfigFlags({.MSAA_4X_HINT, .VSYNC_HINT, .WINDOW_RESIZABLE})
 	rl.InitWindow(1280, 720, "PSYCHO // sound ride")
 	defer rl.CloseWindow()
+	rl.SetWindowMinSize(800, 600)
+	cursor_hidden := false
+	if config.hide_cursor {
+		rl.HideCursor()
+		cursor_hidden = true
+	}
+	defer {
+		if cursor_hidden do rl.ShowCursor()
+	}
 	rl.SetTargetFPS(120)
 	scene := rl.LoadRenderTexture(rl.GetScreenWidth(), rl.GetScreenHeight())
 	if !rl.IsRenderTextureValid(scene) {
@@ -1513,8 +1783,12 @@ main :: proc() {
 		return
 	}
 	defer rl.UnloadMusicStream(music)
-	rl.SetMusicVolume(music, 0.65)
-	volume: f32 = 0.65
+	music.looping = false
+	music_duration := rl.GetMusicTimeLength(music)
+	volume := config.music_volume
+	rl.SetMusicVolume(music, volume)
+	fx_on = config.audio_fx
+	fx_amount = config.audio_fx_strength
 	fx_rate = f64(music.sampleRate)
 	fx_channels = int(music.channels)
 	if fx_channels >= 2 {
@@ -1522,6 +1796,8 @@ main :: proc() {
 		defer rl.DetachAudioStreamProcessor(music.stream, audio_fx)
 	}
 	rl.PlayMusicStream(music)
+	playback_seen := rl.IsMusicStreamPlaying(music)
+	song_name_c := strings.clone_to_cstring(os.base(audio_path), context.temp_allocator)
 
 	player_lane, steer_lean: f32
 	mouse_active := false
@@ -1531,13 +1807,14 @@ main :: proc() {
 	last_tone = -1
 	shield := 3
 	paused, finished: bool
-	visual_fx := true
-	visual_amount: f32 = 0.65
+	results_saved, result_save_ok: bool
+	visual_fx := config.visual_fx
+	visual_amount := config.visual_strength
 	pulse, shake, overdrive: f32
 	for !rl.WindowShouldClose() {
 		rl.UpdateMusicStream(music)
 		dt := min(rl.GetFrameTime(), 0.05)
-		if rl.IsKeyPressed(.SPACE) {
+		if !finished && rl.IsKeyPressed(.SPACE) {
 			paused = !paused
 			if paused do rl.PauseMusicStream(music)
 			else do rl.ResumeMusicStream(music)
@@ -1570,7 +1847,7 @@ main :: proc() {
 			player_lane = clamp(player_lane + move * dt * 2.2, -1, 1)
 		} else if mouse_active {
 			target_lane := mouse_lane_target(rl.GetMouseX(), rl.GetScreenWidth())
-			player_lane = smooth_mouse_lane(player_lane, target_lane, dt)
+			player_lane = smooth_mouse_lane(player_lane, target_lane, dt, config.mouse_response)
 		}
 		lane_speed := (player_lane - lane_before_input) / max(0.001, dt)
 		target_lean := clamp(lane_speed * 0.28, -1, 1)
@@ -1628,14 +1905,39 @@ main :: proc() {
 		overdrive = max(0, overdrive - dt)
 		fx_tingle = max(0, fx_tingle - dt * 2.0)
 		fx_beat_hz = 4.0 + f64(nodes[current].bass) * 6.0
-		finished = current >= len(nodes) - 2 && !rl.IsMusicStreamPlaying(music)
+		music_playing := rl.IsMusicStreamPlaying(music)
+		if music_playing do playback_seen = true
+		finished = ride_finished(paused, playback_seen, music_playing)
+		if finished && !results_saved {
+			result_save_ok = save_game_result(
+				audio_path,
+				score,
+				best_streak,
+				crashes,
+				music_duration,
+			)
+			results_saved = true
+			if result_save_ok do fmt.printfln("result: saved %s", RESULTS_PATH)
+			else do fmt.eprintfln("result: could not save %s", RESULTS_PATH)
+		}
 		if finished && rl.IsKeyPressed(.R) {
 			rl.SeekMusicStream(music, 0)
 			rl.PlayMusicStream(music)
-			last_index, score, streak, color_chain, last_tone, crashes = 0, 0, 0, 0, -1, 0
+			playback_seen = rl.IsMusicStreamPlaying(music)
+			last_index, score, streak, best_streak, color_chain, last_tone, crashes =
+				0, 0, 0, 0, 0, -1, 0
 			shield = 3
 			overdrive = 0
 			finished = false
+			results_saved, result_save_ok = false, false
+		}
+		should_hide_cursor := config.hide_cursor && !paused && !finished
+		if should_hide_cursor && !cursor_hidden {
+			rl.HideCursor()
+			cursor_hidden = true
+		} else if !should_hide_cursor && cursor_hidden {
+			rl.ShowCursor()
+			cursor_hidden = false
 		}
 
 		w, h := rl.GetScreenWidth(), rl.GetScreenHeight()
@@ -1653,16 +1955,21 @@ main :: proc() {
 		bg_bottom := pace_color(max(0, pace_now - 0.22), 0.018 + pace_curve * 0.032)
 		rl.BeginTextureMode(scene)
 		rl.ClearBackground(rl.BLACK)
-		rl.DrawRectangleGradientV(0, 0, scene.texture.width, scene.texture.height, bg_top, bg_bottom)
+		rl.DrawRectangleGradientV(
+			0,
+			0,
+			scene.texture.width,
+			scene.texture.height,
+			bg_top,
+			bg_bottom,
+		)
 		rl.BeginBlendMode(.ADDITIVE)
 		scene_center_x := scene.texture.width / 2
 		scene_center_y := scene.texture.height / 2
 		scene_radius := f32(min(scene.texture.width, scene.texture.height))
 		for ring in 0 ..< 5 {
 			radius :=
-				scene_radius * (0.12 + f32(ring) * 0.13) +
-				pulse * 30 +
-				pace_curve * f32(ring * 9)
+				scene_radius * (0.12 + f32(ring) * 0.13) + pulse * 30 + pace_curve * f32(ring * 9)
 			ring_color := pace_color(pace_now, 0.42 + f32(ring) * 0.08, 45 + u8(ring * 8))
 			rl.DrawCircleLines(scene_center_x, scene_center_y, radius, ring_color)
 		}
@@ -1770,18 +2077,72 @@ main :: proc() {
 		}
 		if finished {
 			rl.DrawRectangle(0, 0, w, h, rl.Color{0, 0, 0, 185})
-			rl.DrawText("RIDE COMPLETE", w / 2 - 190, h / 2 - 72, 44, rl.Color{255, 90, 220, 255})
+			panel_width := min(650, w - 40)
+			panel_height := min(330, h - 40)
+			panel_x := (w - panel_width) / 2
+			panel_y := (h - panel_height) / 2
+			rl.DrawRectangle(panel_x, panel_y, panel_width, panel_height, rl.Color{3, 5, 20, 242})
+			rl.DrawRectangleLines(
+				panel_x,
+				panel_y,
+				panel_width,
+				panel_height,
+				rl.Color{75, 220, 255, 220},
+			)
+			title: cstring = "RIDE COMPLETE"
 			rl.DrawText(
-				rl.TextFormat("SCORE %d   BEST STREAK %d", score, best_streak),
-				w / 2 - 180,
-				h / 2,
-				22,
+				title,
+				w / 2 - rl.MeasureText(title, 44) / 2,
+				panel_y + 28,
+				44,
+				rl.Color{255, 90, 220, 255},
+			)
+			song_label := rl.TextFormat("FULL LOOP  //  %s", song_name_c)
+			rl.DrawText(
+				song_label,
+				w / 2 - rl.MeasureText(song_label, 18) / 2,
+				panel_y + 82,
+				18,
+				rl.Color{130, 220, 255, 255},
+			)
+			score_label := rl.TextFormat("SCORE  %08d", score)
+			rl.DrawText(
+				score_label,
+				w / 2 - rl.MeasureText(score_label, 32) / 2,
+				panel_y + 124,
+				32,
 				rl.WHITE,
 			)
 			rl.DrawText(
-				"press R to ride again",
-				w / 2 - 130,
-				h / 2 + 42,
+				rl.TextFormat(
+					"BEST STREAK  %d     CRASHES  %d     TIME  %02d:%02d",
+					best_streak,
+					crashes,
+					int(music_duration) / 60,
+					int(music_duration) % 60,
+				),
+				panel_x + 36,
+				panel_y + 176,
+				20,
+				rl.Color{210, 220, 245, 255},
+			)
+			save_label: cstring = "RESULT SAVE FAILED"
+			save_color := rl.Color{255, 90, 105, 255}
+			if result_save_ok {
+				save_label = "RESULT SAVED  //  .games/results.tsv"
+				save_color = rl.Color{80, 255, 160, 255}
+			}
+			rl.DrawText(
+				save_label,
+				w / 2 - rl.MeasureText(save_label, 17) / 2,
+				panel_y + 222,
+				17,
+				save_color,
+			)
+			rl.DrawText(
+				"PRESS R TO RIDE AGAIN",
+				w / 2 - rl.MeasureText("PRESS R TO RIDE AGAIN", 20) / 2,
+				panel_y + 267,
 				20,
 				rl.Color{130, 220, 255, 255},
 			)
