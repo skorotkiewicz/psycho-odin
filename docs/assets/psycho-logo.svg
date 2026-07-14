@@ -1,0 +1,87 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 340" role="img" aria-labelledby="title description">
+  <title id="title">PSYCHO</title>
+  <desc id="description">A neon racing ship splitting into cyan and gold musical echo ghosts.</desc>
+  <defs>
+    <linearGradient id="panel" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#080513"/>
+      <stop offset="0.55" stop-color="#10051d"/>
+      <stop offset="1" stop-color="#070a17"/>
+    </linearGradient>
+    <linearGradient id="spectrum" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#42efff"/>
+      <stop offset="0.48" stop-color="#ff35d3"/>
+      <stop offset="1" stop-color="#ffd84a"/>
+    </linearGradient>
+    <linearGradient id="ship-fill" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.42" stop-color="#ff5cdb"/>
+      <stop offset="1" stop-color="#8b2fff"/>
+    </linearGradient>
+    <radialGradient id="cockpit" cx="50%" cy="35%" r="65%">
+      <stop offset="0" stop-color="#ffffff"/>
+      <stop offset="0.35" stop-color="#6ff7ff"/>
+      <stop offset="1" stop-color="#ff35d3"/>
+    </radialGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5" result="blur"/>
+      <feMerge>
+        <feMergeNode in="blur"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+    <filter id="soft-glow" x="-60%" y="-60%" width="220%" height="220%">
+      <feGaussianBlur stdDeviation="10"/>
+    </filter>
+    <g id="echo-ship" fill="none" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M0-82 -76 63 -24 39 0 88 24 39 76 63Z"/>
+      <path d="M0-82V88M-76 63 0 25 76 63"/>
+      <ellipse cx="0" cy="-5" rx="18" ry="31"/>
+    </g>
+  </defs>
+
+  <rect x="3" y="3" width="1194" height="334" rx="30" fill="url(#panel)" stroke="url(#spectrum)" stroke-width="3"/>
+
+  <g fill="none" stroke="#ff35d3" opacity="0.14">
+    <path d="M18 266C122 217 191 301 284 251S463 209 548 255 720 295 806 241 1000 206 1182 255"/>
+    <path d="M18 290C122 241 191 325 284 275S463 233 548 279 720 319 806 265 1000 230 1182 279"/>
+    <path d="M18 314C122 265 191 349 284 299S463 257 548 303 720 343 806 289 1000 254 1182 303"/>
+  </g>
+  <g stroke="#42efff" stroke-width="2" opacity="0.22">
+    <path d="M60 238v-18m18 18v-35m18 35v-12m18 12v-51m18 51v-28m18 28v-61m18 61v-32m18 32v-16m18 16v-44m18 44v-25m18 25v-55m18 55v-18m18 18v-37m18 37v-12m18 12v-29m18 29v-9"/>
+  </g>
+
+  <g filter="url(#glow)">
+    <text x="65" y="145" fill="url(#spectrum)" font-family="DejaVu Sans Mono, ui-monospace, monospace" font-size="92" font-weight="700" letter-spacing="9">PSYCHO</text>
+    <path d="M69 169H570" stroke="url(#spectrum)" stroke-width="4"/>
+  </g>
+  <text x="68" y="208" fill="#d9d8f7" font-family="DejaVu Sans Mono, ui-monospace, monospace" font-size="21" letter-spacing="5">RIDE THE SHAPE OF SOUND</text>
+
+  <g transform="translate(908 171)">
+    <path d="M0 63V153" stroke="#ff35d3" stroke-width="22" stroke-linecap="round" opacity="0.18" filter="url(#soft-glow)"/>
+    <g fill="#ff35d3">
+      <circle cy="105" r="9" opacity="0.62"/>
+      <circle cy="129" r="7" opacity="0.40"/>
+      <circle cy="151" r="5" opacity="0.24"/>
+    </g>
+
+    <g stroke-width="3" filter="url(#glow)">
+      <use href="#echo-ship" transform="translate(-126 38) scale(.70)" stroke="#42efff" opacity="0.22"/>
+      <use href="#echo-ship" transform="translate(-82 25) scale(.80)" stroke="#42efff" opacity="0.42"/>
+      <use href="#echo-ship" transform="translate(-42 12) scale(.90)" stroke="#42efff" opacity="0.76"/>
+      <use href="#echo-ship" transform="translate(126 38) scale(.70)" stroke="#ffd84a" opacity="0.22"/>
+      <use href="#echo-ship" transform="translate(82 25) scale(.80)" stroke="#ffd84a" opacity="0.42"/>
+      <use href="#echo-ship" transform="translate(42 12) scale(.90)" stroke="#ffd84a" opacity="0.76"/>
+    </g>
+
+    <path d="M0-92 -86 70 -28 43 0 96 28 43 86 70Z" fill="url(#ship-fill)" fill-opacity="0.82" stroke="#fff" stroke-width="3" stroke-linejoin="round" filter="url(#glow)"/>
+    <path d="M0-92V96M-86 70 0 27 86 70" fill="none" stroke="#fff" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" opacity="0.92"/>
+    <ellipse cx="0" cy="-7" rx="21" ry="36" fill="url(#cockpit)" stroke="#fff" stroke-width="3" filter="url(#glow)"/>
+    <circle cx="-35" cy="57" r="11" fill="#42efff" stroke="#fff" stroke-width="2"/>
+    <circle cx="35" cy="57" r="11" fill="#ffd84a" stroke="#fff" stroke-width="2"/>
+  </g>
+
+  <g font-family="DejaVu Sans Mono, ui-monospace, monospace" font-size="13" letter-spacing="2" fill="#80799d">
+    <text x="68" y="294">AUDIO → ROAD → FLOW</text>
+    <text x="1000" y="306" fill="#ff5cdb">ODIN / RAYLIB</text>
+  </g>
+</svg>
