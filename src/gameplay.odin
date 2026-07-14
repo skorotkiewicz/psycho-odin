@@ -7,19 +7,13 @@ LANE_COLLISION_TOLERANCE :: f32(0.43)
 
 SECRET_OVERDRIVE_SECONDS :: f32(999)
 SECRET_SEQUENCE_TIMEOUT :: f32(5)
-SECRET_OVERDRIVE_SEQUENCE := [13]rl.KeyboardKey {
-	.G,
-	.H,
-	.O,
+SECRET_OVERDRIVE_SEQUENCE := [7]rl.KeyboardKey {
 	.S,
 	.T,
 	.S,
 	.G,
 	.H,
 	.O,
-	.S,
-	.T,
-	.S,
 	.F10,
 }
 
