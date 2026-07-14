@@ -93,25 +93,43 @@ draw_course_map :: proc(
 	current: int,
 	x, y, width, height: i32,
 	bounds: Course_Map_Bounds,
+	traces_only: bool = false,
 ) {
 	if len(nodes) < 2 || width < 80 || height < 50 do return
-	rl.DrawRectangle(x, y, width, height, rl.Color{2, 5, 17, 218})
-	rl.DrawRectangleLines(x, y, width, height, rl.Color{80, 135, 190, 130})
-	rl.DrawText("RIDE MAP  //  HEIGHT + TURNS", x + 11, y + 8, 13, rl.Color{160, 205, 235, 230})
+	if !traces_only {
+		rl.DrawRectangle(x, y, width, height, rl.Color{2, 5, 17, 218})
+		rl.DrawRectangleLines(x, y, width, height, rl.Color{80, 135, 190, 130})
+		rl.DrawText(
+			"RIDE MAP  //  HEIGHT + TURNS",
+			x + 11,
+			y + 8,
+			13,
+			rl.Color{160, 205, 235, 230},
+		)
+	}
 
-	left, top := f32(x + 11), f32(y + 28)
-	total_width, plot_height := f32(width - 22), f32(height - 39)
+	left, top: f32
+	total_width, plot_height: f32
+	if traces_only {
+		left, top = f32(x), f32(y)
+		total_width, plot_height = f32(width), f32(height)
+	} else {
+		left, top = f32(x + 11), f32(y + 28)
+		total_width, plot_height = f32(width - 22), f32(height - 39)
+	}
 	profile_width := total_width * 0.70
 	plan_gap: f32 = 12
 	plan_left := left + profile_width + plan_gap
 	plan_width := total_width - profile_width - plan_gap
-	rl.DrawLine(
-		i32(plan_left - plan_gap * 0.5),
-		i32(top),
-		i32(plan_left - plan_gap * 0.5),
-		i32(top + plot_height),
-		rl.Color{70, 95, 135, 105},
-	)
+	if !traces_only {
+		rl.DrawLine(
+			i32(plan_left - plan_gap * 0.5),
+			i32(top),
+			i32(plan_left - plan_gap * 0.5),
+			i32(top + plot_height),
+			rl.Color{70, 95, 135, 105},
+		)
+	}
 	samples_on_map := min(len(nodes), max(2, int(total_width)))
 	previous_point := course_map_point(
 		nodes,

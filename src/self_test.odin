@@ -443,11 +443,26 @@ self_test :: proc() {
 	assert(ride_controls_enabled(false, false), "steering must work during an active ride")
 	assert(!ride_controls_enabled(true, false), "steering must stop while paused")
 	assert(!ride_controls_enabled(false, true), "steering must stop after the ride finishes")
-	hidden_ride_overlays := overlay_visibility(true, false)
-	assert(!hidden_ride_overlays.ride_hud && !hidden_ride_overlays.results)
-	hidden_finished_overlays := overlay_visibility(true, true)
+	hud_mode: Hud_Mode = .FULL
+	hud_mode = next_hud_mode(hud_mode)
+	assert(hud_mode == .HIDDEN)
+	hud_mode = next_hud_mode(hud_mode)
+	assert(hud_mode == .MAP_ONLY)
+	hud_mode = next_hud_mode(hud_mode)
+	assert(hud_mode == .FULL, "F3 HUD modes must wrap back to full")
+	hidden_ride_overlays := overlay_visibility(.HIDDEN, false)
 	assert(
-		!hidden_finished_overlays.ride_hud && hidden_finished_overlays.results,
+		!hidden_ride_overlays.ride_hud &&
+		!hidden_ride_overlays.map_only &&
+		!hidden_ride_overlays.results,
+	)
+	map_only_overlays := overlay_visibility(.MAP_ONLY, false)
+	assert(!map_only_overlays.ride_hud && map_only_overlays.map_only)
+	hidden_finished_overlays := overlay_visibility(.HIDDEN, true)
+	assert(
+		!hidden_finished_overlays.ride_hud &&
+		!hidden_finished_overlays.map_only &&
+		hidden_finished_overlays.results,
 		"F3 must never hide the completed-ride results screen",
 	)
 	protected_hazard := resolve_hazard(2, 1500, 7, 3, 1, 4, 0.01)

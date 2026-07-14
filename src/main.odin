@@ -136,7 +136,7 @@ main :: proc() {
 	player_lane, steer_lean: f32
 	mouse_active := false
 	show_fps := false
-	hide_ride_hud := false
+	hud_mode: Hud_Mode = .FULL
 	last_index := 0
 	score, streak, best_streak, color_chain, crashes: int
 	last_tone: i32
@@ -162,7 +162,7 @@ main :: proc() {
 		if rl.IsKeyPressed(.PERIOD) do visual_amount = min(1, visual_amount + 0.1)
 		if rl.IsKeyPressed(.F) do rl.ToggleFullscreen()
 		if rl.IsKeyPressed(.F2) do show_fps = !show_fps
-		if rl.IsKeyPressed(.F3) do hide_ride_hud = !hide_ride_hud
+		if rl.IsKeyPressed(.F3) do hud_mode = next_hud_mode(hud_mode)
 		if rl.IsKeyPressed(.LEFT_BRACKET) do fx_amount = max(0, fx_amount - 0.05)
 		if rl.IsKeyPressed(.RIGHT_BRACKET) do fx_amount = min(0.5, fx_amount + 0.05)
 		if rl.IsKeyPressed(.MINUS) {
@@ -356,7 +356,7 @@ main :: proc() {
 		rl.DrawTexturePro(scene.texture, source, destination, {}, 0, rl.WHITE)
 		if visual_fx && rl.IsShaderValid(shader) do rl.EndShaderMode()
 
-		overlays := overlay_visibility(hide_ride_hud, finished)
+		overlays := overlay_visibility(hud_mode, finished)
 		if overlays.ride_hud {
 			rl.DrawRectangle(22, 20, 470, 92, rl.Color{2, 4, 16, 205})
 			rl.DrawText("PSYCHO", 36, 30, 32, rl.Color{255, 80, 210, 255})
@@ -444,6 +444,11 @@ main :: proc() {
 				14,
 				rl.Color{115, 190, 220, 210},
 			)
+		}
+		if overlays.map_only {
+			map_width := i32(clamp(f32(w) * 0.35, 280, 440))
+			map_height := i32(clamp(f32(h) * 0.20, 140, 180))
+			draw_course_map(nodes, current, 24, 24, map_width, map_height, map_bounds, true)
 		}
 		if paused {
 			rl.DrawRectangle(0, 0, w, h, rl.Color{0, 0, 0, 130})

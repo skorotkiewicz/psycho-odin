@@ -30,12 +30,35 @@ ride_controls_enabled :: proc(paused, finished: bool) -> bool {
 	return !paused && !finished
 }
 
-Overlay_Visibility :: struct {
-	ride_hud, results: bool,
+Hud_Mode :: enum {
+	FULL,
+	HIDDEN,
+	MAP_ONLY,
 }
 
-overlay_visibility :: proc(hide_ride_hud, finished: bool) -> Overlay_Visibility {
-	return {ride_hud = !hide_ride_hud, results = finished}
+next_hud_mode :: proc(mode: Hud_Mode) -> Hud_Mode {
+	switch mode {
+	case .FULL:
+		return .HIDDEN
+	case .HIDDEN:
+		return .MAP_ONLY
+	case .MAP_ONLY:
+		return .FULL
+	}
+	return .FULL
+}
+
+Overlay_Visibility :: struct {
+	ride_hud, map_only, results: bool,
+}
+
+overlay_visibility :: proc(hud_mode: Hud_Mode, finished: bool) -> Overlay_Visibility {
+	visibility := Overlay_Visibility {
+		results = finished,
+	}
+	visibility.ride_hud = hud_mode == .FULL
+	visibility.map_only = hud_mode == .MAP_ONLY
+	return visibility
 }
 
 Hazard_Outcome :: struct {
