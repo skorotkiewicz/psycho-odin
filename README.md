@@ -8,6 +8,13 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/skorotkiewicz/psycho-odin/releases/latest"><img src="https://img.shields.io/github/v/release/skorotkiewicz/psycho-odin?display_name=tag&amp;sort=semver&amp;style=flat-square&amp;color=8b5cf6" alt="Latest release"></a>
+  <a href="https://github.com/skorotkiewicz/psycho-odin/actions/workflows/release.yml"><img src="https://github.com/skorotkiewicz/psycho-odin/actions/workflows/release.yml/badge.svg" alt="Release builds"></a>
+  <a href="https://github.com/skorotkiewicz/psycho-odin/releases/latest"><img src="https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-00bcd4?style=flat-square" alt="Linux, macOS and Windows"></a>
+  <a href="LICENSE"><img src="https://img.shields.io/github/license/skorotkiewicz/psycho-odin?style=flat-square&amp;color=f2c94c" alt="MIT license"></a>
+</p>
+
+<p align="center">
   <img src="assets/screenshot-3.png" alt="PSYCHO racing down a fast, music-generated descent" width="900">
 </p>
 
