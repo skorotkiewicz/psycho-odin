@@ -14,9 +14,9 @@
   <a href="LICENSE"><img src="https://img.shields.io/github/license/skorotkiewicz/psycho-odin?style=flat-square&amp;color=f2c94c" alt="MIT license"></a>
 </p>
 
-<p align="center">
+<!--<p align="center">
   <img src="assets/screenshot-3.png" alt="PSYCHO racing down a fast, music-generated descent" width="900">
-</p>
+</p>-->
 
 PSYCHO listens to a song before the ride begins, then composes a complete 3D
 track from its rhythm, spectrum, dynamics, and tempo. Quiet passages climb in
