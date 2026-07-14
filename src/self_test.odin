@@ -521,6 +521,34 @@ self_test :: proc() {
 	assert(ride_controls_enabled(false, false), "steering must work during an active ride")
 	assert(!ride_controls_enabled(true, false), "steering must stop while paused")
 	assert(!ride_controls_enabled(false, true), "steering must stop after the ride finishes")
+	secret_sequence: Secret_Sequence_State
+	secret_activations := 0
+	for key in SECRET_OVERDRIVE_SEQUENCE {
+		secret_step := secret_overdrive_sequence_step(secret_sequence, key, 0.1)
+		secret_sequence = secret_step.state
+		if secret_step.activated do secret_activations += 1
+	}
+	assert(
+		secret_activations == 1 && secret_sequence.matched == 0 && secret_sequence.remaining == 0,
+		"typing GHOSTS twice followed by F10 must activate the secret exactly once",
+	)
+	secret_step := secret_overdrive_sequence_step({}, .G, 0)
+	secret_step = secret_overdrive_sequence_step(secret_step.state, .X, 0)
+	assert(
+		secret_step.state.matched == 0 && secret_step.state.remaining == 0,
+		"a wrong secret key must reset the ritual",
+	)
+	secret_step = secret_overdrive_sequence_step({}, .G, 0)
+	secret_step = secret_overdrive_sequence_step(
+		secret_step.state,
+		.KEY_NULL,
+		SECRET_SEQUENCE_TIMEOUT + 0.1,
+	)
+	assert(
+		secret_step.state.matched == 0 && secret_step.state.remaining == 0,
+		"the secret ritual must time out",
+	)
+	assert(SECRET_OVERDRIVE_SECONDS == 999)
 	hud_mode: Hud_Mode = .FULL
 	hud_mode = next_hud_mode(hud_mode)
 	assert(hud_mode == .HIDDEN)

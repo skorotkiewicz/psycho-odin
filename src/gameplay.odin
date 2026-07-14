@@ -1,8 +1,71 @@
 package main
 
 import "core:math"
+import rl "vendor:raylib"
 
 LANE_COLLISION_TOLERANCE :: f32(0.43)
+
+SECRET_OVERDRIVE_SECONDS :: f32(999)
+SECRET_SEQUENCE_TIMEOUT :: f32(5)
+SECRET_OVERDRIVE_SEQUENCE := [13]rl.KeyboardKey {
+	.G,
+	.H,
+	.O,
+	.S,
+	.T,
+	.S,
+	.G,
+	.H,
+	.O,
+	.S,
+	.T,
+	.S,
+	.F10,
+}
+
+Secret_Sequence_State :: struct {
+	matched:   int,
+	remaining: f32,
+}
+
+Secret_Sequence_Step :: struct {
+	state:     Secret_Sequence_State,
+	activated: bool,
+}
+
+secret_overdrive_sequence_step :: proc(
+	state: Secret_Sequence_State,
+	key: rl.KeyboardKey,
+	delta_time: f32,
+) -> Secret_Sequence_Step {
+	result := Secret_Sequence_Step {
+		state = state,
+	}
+	result.state.remaining = max(0, result.state.remaining - max(0, delta_time))
+	if result.state.remaining == 0 {
+		result.state.matched = 0
+	}
+	if key == .KEY_NULL do return result
+	if result.state.matched < 0 || result.state.matched >= len(SECRET_OVERDRIVE_SEQUENCE) {
+		result.state = {}
+	}
+
+	expected := SECRET_OVERDRIVE_SEQUENCE[result.state.matched]
+	if key == expected {
+		result.state.matched += 1
+		result.state.remaining = SECRET_SEQUENCE_TIMEOUT
+		if result.state.matched == len(SECRET_OVERDRIVE_SEQUENCE) {
+			result.state = {}
+			result.activated = true
+		}
+	} else if key == SECRET_OVERDRIVE_SEQUENCE[0] {
+		result.state.matched = 1
+		result.state.remaining = SECRET_SEQUENCE_TIMEOUT
+	} else {
+		result.state = {}
+	}
+	return result
+}
 
 steer_input :: proc(left, right: bool) -> f32 {
 	direction: f32

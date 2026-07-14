@@ -148,6 +148,7 @@ main :: proc() {
 	visual_amount := config.visual_strength
 	pulse, shake, overdrive: f32
 	rhythm_push: Rhythm_Push
+	secret_sequence: Secret_Sequence_State
 	for !rl.WindowShouldClose() {
 		rl.UpdateMusicStream(music)
 		dt := min(rl.GetFrameTime(), 0.05)
@@ -172,6 +173,23 @@ main :: proc() {
 		if rl.IsKeyPressed(.EQUAL) {
 			volume = min(0.8, volume + 0.05)
 			rl.SetMusicVolume(music, volume)
+		}
+		secret_step := secret_overdrive_sequence_step(secret_sequence, .KEY_NULL, dt)
+		secret_sequence = secret_step.state
+		for {
+			key := rl.GetKeyPressed()
+			if key == .KEY_NULL {
+				break
+			}
+			secret_step = secret_overdrive_sequence_step(secret_sequence, key, 0)
+			secret_sequence = secret_step.state
+			if secret_step.activated && !finished {
+				overdrive = SECRET_OVERDRIVE_SECONDS
+				pulse, fx_tingle = 1, 1
+				rhythm_push.impact = 1
+				rhythm_push.velocity = max(rhythm_push.velocity, 4.2)
+				fmt.println("PSYCHO: GHOSTS UNCHAINED")
+			}
 		}
 		if ride_controls_enabled(paused, finished) {
 			left_down := rl.IsKeyDown(.A) || rl.IsKeyDown(.LEFT)
@@ -306,6 +324,7 @@ main :: proc() {
 			shield = 3
 			overdrive = 0
 			rhythm_push = {}
+			secret_sequence = {}
 			finished = false
 			results_saved, result_save_ok = false, false
 		}
