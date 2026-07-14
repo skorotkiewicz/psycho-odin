@@ -2,118 +2,60 @@
 
 set shell := ["bash", "-uc"]
 
-odin_dir         := "./odin-dev"
-odin             := "./odin-dev/odin"
+odin_dir := env_var("HOME") / "odin-dev"
+odin     := odin_dir / "odin"
+odinfmt  := odin_dir / "odinfmt"
+source   := "src"
+binary   := `basename "$PWD"`
+cache    := ".psycho_cache"
+
 odin_release_api := "https://api.github.com/repos/odin-lang/Odin/releases/latest"
-binary           := "psycho"
-cache            := ".psycho_cache"
-source           := "./src"
+ols_release_api  := "https://api.github.com/repos/DanielGavin/ols/releases/latest"
 
 [private]
 default:
     @just --list
 
 
-# Download the latest official Odin release; existing installs are reused.
+# Install the latest official Odin release.
 setup:
     #!/usr/bin/env bash
     set -euo pipefail
 
-    target="{{odin_dir}}"
-    compiler="{{odin}}"
+    if [[ ! -x "{{odin}}" ]]; then
+        case "$(uname -s)-$(uname -m)" in
+            Linux-x86_64)  platform=linux-amd64 ;;
+            Linux-aarch64) platform=linux-arm64 ;;
+            Darwin-x86_64) platform=macos-amd64 ;;
+            Darwin-arm64)  platform=macos-arm64 ;;
+            *) echo "error: unsupported platform" >&2; exit 1 ;;
+        esac
 
-    if [[ -x "$compiler" ]]; then
-        echo "Odin already installed: $("$compiler" version)"
-        exit 0
+        tag="$(curl -fsSL "{{odin_release_api}}" | jq -r .tag_name)"
+        url="https://github.com/odin-lang/Odin/releases/download/$tag/odin-$platform-$tag.tar.gz"
+
+        mkdir -p "{{odin_dir}}"
+        curl -fL "$url" |
+            tar -xz --strip-components=1 -C "{{odin_dir}}"
     fi
 
-    if [[ -e "$target" ]]; then
-        echo "error: $target exists, but $compiler is not executable" >&2
-        echo "Move or remove that directory, then run 'just setup' again." >&2
-        exit 1
+    if [[ ! -x "{{odinfmt}}" ]]; then
+        tag="$(curl -fsSL "{{ols_release_api}}" | jq -r .tag_name)"
+        tmp="$(mktemp -d)"
+        trap 'rm -rf "$tmp"' EXIT
+
+        curl -fL "https://github.com/DanielGavin/ols/archive/refs/tags/$tag.tar.gz" |
+            tar -xz --strip-components=1 -C "$tmp"
+
+        cd "$tmp"
+        "{{odin}}" build tools/odinfmt/main.odin \
+            -file \
+            -collection:src=src \
+            -out:"{{odinfmt}}" \
+            -o:speed
     fi
 
-    for tool in curl tar awk; do
-        if ! command -v "$tool" >/dev/null; then
-            echo "error: '$tool' is required to install Odin" >&2
-            exit 1
-        fi
-    done
-
-    case "$(uname -s)" in
-        Linux)  platform="linux" ;;
-        Darwin) platform="macos" ;;
-        *)
-            echo "error: automatic Odin setup supports Linux and macOS" >&2
-            exit 1
-            ;;
-    esac
-
-    case "$(uname -m)" in
-        x86_64|amd64) architecture="amd64" ;;
-        arm64|aarch64) architecture="arm64" ;;
-        *)
-            echo "error: automatic Odin setup supports AMD64 and ARM64" >&2
-            exit 1
-            ;;
-    esac
-
-    temporary="$(mktemp -d "${TMPDIR:-/tmp}/psycho-odin.XXXXXX")"
-    trap 'rm -rf "$temporary"' EXIT
-    release_json="$temporary/release.json"
-    archive="$temporary/odin.tar.gz"
-    unpacked="$temporary/unpacked"
-
-    echo "Finding the latest Odin release for ${platform}-${architecture}..."
-    curl -fsSL --retry 3 "{{odin_release_api}}" -o "$release_json"
-
-    asset_url="$(
-        awk -v stem="odin-${platform}-${architecture}-dev-" '
-            /"browser_download_url":/ && index($0, stem) {
-                value = $0
-                sub(/^.*"browser_download_url": "/, "", value)
-                sub(/".*$/, "", value)
-                if (value ~ /\.tar\.gz$/) {
-                    print value
-                    exit
-                }
-            }
-        ' "$release_json"
-    )"
-
-    if [[ -z "$asset_url" ]]; then
-        echo "error: the latest release has no ${platform}-${architecture} archive" >&2
-        exit 1
-    fi
-
-    echo "Downloading ${asset_url##*/}..."
-    curl -fL --retry 3 --progress-bar "$asset_url" -o "$archive"
-    mkdir "$unpacked"
-    tar -xzf "$archive" -C "$unpacked"
-
-    extracted_compiler=""
-    for candidate in "$unpacked/odin" "$unpacked"/*/odin; do
-        if [[ -f "$candidate" ]]; then
-            extracted_compiler="$candidate"
-            break
-        fi
-    done
-    if [[ -z "$extracted_compiler" || ! -x "$extracted_compiler" ]]; then
-        echo "error: the downloaded archive does not contain an executable Odin compiler" >&2
-        exit 1
-    fi
-
-    install_root="${extracted_compiler%/odin}"
-    for directory in base core vendor; do
-        if [[ ! -d "$install_root/$directory" ]]; then
-            echo "error: the downloaded archive is missing '$directory/'" >&2
-            exit 1
-        fi
-    done
-
-    "$extracted_compiler" version >/dev/null
-    mv "$install_root" "$target"
-    echo "Installed $("$compiler" version) in $target"
+    "{{odin}}" version
 
 
 # Remove generated files.
@@ -121,53 +63,30 @@ clean:
     rm -rf "{{cache}}" "{{binary}}"
 
 
-# Normal optimized build.
-build: setup clean
-    {{odin}} build "{{source}}" -out:{{binary}} -o:speed
+# Build.
+build: setup
+    {{odin}} build "{{source}}" -out:"{{binary}}" -o:speed
+
+build-debug: setup
+    {{odin}} build "{{source}}" -out:"{{binary}}" -debug -o:none
+
+build-size: setup
+    {{odin}} build "{{source}}" -out:"{{binary}}" -o:size
+
+build-native: setup
+    {{odin}} build "{{source}}" -out:"{{binary}}" -o:aggressive -microarch:native
+
+build-timings: setup
+    {{odin}} build "{{source}}" -out:"{{binary}}" -o:speed -show-more-timings
 
 
-# Debug build with symbols and no optimization.
-build-debug: setup clean
-    {{odin}} build "{{source}}" -out:{{binary}} -debug -o:none
-
-
-# Optimize for executable size.
-build-size: setup clean
-    {{odin}} build "{{source}}" -out:{{binary}} -o:size
-
-
-# Aggressive native-machine build.
-# Fast, but less portable and more aggressive than normal release builds.
-build-native: setup clean
-    {{odin}} build "{{source}}" \
-        -out:{{binary}} \
-        -o:aggressive \
-        -microarch:native
-
-
-# Build and print compiler timing information.
-build-timings: setup clean
-    {{odin}} build "{{source}}" \
-        -out:{{binary}} \
-        -o:speed \
-        -show-more-timings
-
-
-# Fast semantic/type check without producing an executable.
+# Check.
 check: setup
     {{odin}} check "{{source}}"
 
-
-# Additional compiler vetting.
 vet: setup
-    {{odin}} check "{{source}}" \
-        -vet \
-        -vet-tabs \
-        -vet-style \
-        -vet-semicolon
+    {{odin}} check "{{source}}" -vet -vet-tabs -vet-style -vet-semicolon
 
-
-# Strict CI-style linting.
 lint: setup
     {{odin}} check "{{source}}" \
         -vet \
@@ -178,50 +97,36 @@ lint: setup
 
 
 # Format project Odin files.
-# Requires `odinfmt` from OLS to be available in PATH.
-# Formats only the project package.
-fmt:
-    @command -v odinfmt >/dev/null || { \
-        echo "error: odinfmt is not installed or not in PATH"; \
-        exit 1; \
-    }
-    find "{{source}}" \
-        -type f \
-        -name '*.odin' \
-        -exec odinfmt -w {} \;
+fmt: setup
+    find "{{source}}" -type f -name '*.odin' -exec "{{odinfmt}}" -w {} +
 
 
-# Run the project in debug mode.
-# Example: just run --level test.json
+# Run.
 run *args: setup
     {{odin}} run "{{source}}" -debug -- {{args}}
 
-
-# Run an already-built executable.
 exec *args: build
-    ./{{binary}} {{args}}
+    "./{{binary}}" {{args}}
 
 
-# Run PSYCHO's deterministic integration test.
+# Test.
 test: build-debug
-    ./{{binary}} --self-test
+    "./{{binary}}" --self-test
 
-
-# Run the same test under AddressSanitizer.
 test-asan: setup
     {{odin}} build "{{source}}" \
-        -out:{{binary}} \
+        -out:"{{binary}}" \
         -debug \
         -sanitize:address \
         -vet
-    ./{{binary}} --self-test
+    "./{{binary}}" --self-test
 
 
-# Format, lint, test, and build.
+# Everything.
 all: fmt lint test build
 
 
-# Display compiler version and environment report.
+# Odin environment.
 info: setup
     {{odin}} version
     {{odin}} report
