@@ -3,6 +3,22 @@ package main
 import "core:math"
 import rl "vendor:raylib"
 
+Rhythm_Kick :: struct {
+	impact, rebound: f32,
+}
+
+rhythm_kick_response :: proc(accent, bass, fraction, visual_strength: f32) -> Rhythm_Kick {
+	phase := clamp(fraction, 0, 1)
+	strength := clamp(visual_strength, 0, 1)
+	power := clamp(accent, 0, 1) * (0.72 + clamp(bass, 0, 1) * 0.42) * strength
+	power = clamp(power, 0, 1)
+	remaining := 1 - phase
+	return {
+		impact = power * remaining * remaining * remaining,
+		rebound = power * f32(math.sin(f64(phase * f32(math.PI)))) * remaining,
+	}
+}
+
 PSYCHO_SHADER :: `#version 330
 in vec2 fragTexCoord;
 in vec4 fragColor;
@@ -33,6 +49,7 @@ ride_camera :: proc(
 	nodes: []Track_Node,
 	current: int,
 	fraction, player_lane, steer_lean, shake_x, shake_y: f32,
+	rhythm: Rhythm_Kick,
 ) -> rl.Camera3D {
 	next_i := min(current + 1, len(nodes) - 1)
 	base_x := nodes[current].curve_x + (nodes[next_i].curve_x - nodes[current].curve_x) * fraction
@@ -68,20 +85,23 @@ ride_camera :: proc(
 	turn_fov := min(11, abs(turn_preview) * 24)
 	pitch_fov := min(8, abs(pitch_preview) * 24)
 	camera_ground_y := -(player_x * 0.72) * base_bank
-	camera_y := max(
-		CHASE_CAMERA_MIN_Y,
-		camera_ground_y +
-		2.55 +
-		max(0, -base_pitch) * 12 +
-		abs(turn_preview) * 0.8 +
-		abs(pitch_preview) * 1.2 +
-		shake_y,
-	)
+	camera_y :=
+		max(
+			CHASE_CAMERA_MIN_Y,
+			camera_ground_y +
+			2.55 +
+			max(0, -base_pitch) * 12 +
+			abs(turn_preview) * 0.8 +
+			abs(pitch_preview) * 1.2 +
+			shake_y,
+		) +
+		rhythm.rebound * 0.14
+	camera_z := CHASE_CAMERA_Z + rhythm.impact * 0.30
 	return {
-		position = {player_x * 0.72 + shake_x, camera_y, CHASE_CAMERA_Z},
+		position = {player_x * 0.72 + shake_x, camera_y, camera_z},
 		target = {target_x, target_y + 0.05, target_z},
 		up = {-camera_bank, 1, 0},
-		fovy = 66 + pace_curve * 18 + turn_fov + pitch_fov,
+		fovy = 66 + pace_curve * 18 + turn_fov + pitch_fov + rhythm.impact * 2.8,
 		projection = .PERSPECTIVE,
 	}
 }
@@ -90,6 +110,7 @@ draw_ride :: proc(
 	nodes: []Track_Node,
 	current: int,
 	fraction, player_lane, steer_lean, pulse, shake: f32,
+	rhythm: Rhythm_Kick,
 ) {
 	next_i := min(current + 1, len(nodes) - 1)
 	base_x := nodes[current].curve_x + (nodes[next_i].curve_x - nodes[current].curve_x) * fraction
@@ -108,7 +129,16 @@ draw_ride :: proc(
 	pace := pace_sample(nodes, playhead)
 	pace_curve := pace * pace * (3 - 2 * pace)
 	player_x := lane_position(base_width, player_lane)
-	camera := ride_camera(nodes, current, fraction, player_lane, steer_lean, shake_x, shake_y)
+	camera := ride_camera(
+		nodes,
+		current,
+		fraction,
+		player_lane,
+		steer_lean,
+		shake_x,
+		shake_y,
+		rhythm,
+	)
 	rl.BeginMode3D(camera)
 
 	closed_track := track_is_closed(nodes)
@@ -338,14 +368,15 @@ draw_ride :: proc(
 	}
 
 	ship_x := player_x
-	ship_y := 0.38 - ship_x * base_bank
-	ship_color := pace_color(max(0.48, pace + pulse * 0.18), 1)
+	ship_y := 0.38 - ship_x * base_bank - rhythm.impact * 0.10 + rhythm.rebound * 0.28
+	ship_color := pace_color(max(0.48, pace + pulse * 0.18 + rhythm.impact * 0.10), 1)
 	trail_count := 9 + int(pace_curve * 14)
+	trail_spacing := 0.52 + pace * 0.28 + rhythm.impact * 0.22
 	for trail in 1 ..= trail_count {
 		alpha := u8(max(7, 125 / trail))
 		trail_color := pace_color(pace, 1, alpha)
 		trail_point := pitch_around(
-			{ship_x + steer_lean * f32(trail) * 0.018, ship_y, -f32(trail) * (0.52 + pace * 0.28)},
+			{ship_x + steer_lean * f32(trail) * 0.018, ship_y, -f32(trail) * trail_spacing},
 			ship_y,
 			base_pitch,
 		)
@@ -377,10 +408,10 @@ draw_ride :: proc(
 		pod_back := pitch_around({pod_x, pod_y, -0.46}, ship_y, base_pitch)
 		pod_front := pitch_around({pod_x, pod_y, 0.72}, ship_y, base_pitch)
 		rl.DrawCylinderEx(pod_back, pod_front, 0.24, 0.13, 7, pace_color(pace, 0.72))
-		rl.DrawSphere(pod_back, 0.22 + pace * 0.07, rl.WHITE)
+		rl.DrawSphere(pod_back, 0.22 + pace * 0.07 + rhythm.impact * 0.06, rl.WHITE)
 	}
 	cockpit := pitch_around({ship_x, ship_y + 0.24, 0.30}, ship_y, base_pitch)
-	rl.DrawSphere(cockpit, 0.34 + pulse * 0.10, ship_color)
-	rl.DrawSphereWires(cockpit, 0.37 + pulse * 0.10, 7, 7, rl.WHITE)
+	rl.DrawSphere(cockpit, 0.34 + pulse * 0.10 + rhythm.impact * 0.05, ship_color)
+	rl.DrawSphereWires(cockpit, 0.37 + pulse * 0.10 + rhythm.impact * 0.05, 7, 7, rl.WHITE)
 	rl.EndMode3D()
 }

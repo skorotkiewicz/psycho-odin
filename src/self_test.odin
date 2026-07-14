@@ -23,7 +23,7 @@ fast_camera_preview_max_y :: proc(nodes: []Track_Node) -> (max_y: f32, sample_co
 			base_z := nodes[i].curve_z + (nodes[next_i].curve_z - nodes[i].curve_z) * fraction
 			base_heading :=
 				nodes[i].heading + (nodes[next_i].heading - nodes[i].heading) * fraction
-			camera := ride_camera(nodes, i, fraction, 0, 0, 0, 0)
+			camera := ride_camera(nodes, i, fraction, 0, 0, 0, 0, {})
 			for lookahead in lookaheads {
 				preview := road_center_sample(
 					nodes,
@@ -56,7 +56,7 @@ fast_camera_min_y :: proc(nodes: []Track_Node) -> (min_y: f32, sample_count: int
 		for fraction in fractions {
 			if pace_sample(nodes, f32(i) + fraction) < 0.65 do continue
 			for lane in lanes {
-				camera := ride_camera(nodes, i, fraction, lane, 0, 0, -0.18)
+				camera := ride_camera(nodes, i, fraction, lane, 0, 0, -0.18, {})
 				min_y = min(min_y, camera.position.y)
 				sample_count += 1
 			}
@@ -364,6 +364,16 @@ self_test :: proc() {
 	assert(high_background.sparkle > calm_background.sparkle)
 	assert(beat_background.beat_flash > calm_background.beat_flash)
 	assert(fast_background.drift > calm_background.drift)
+	silent_kick := rhythm_kick_response(0, 1, 0, 1)
+	impact_kick := rhythm_kick_response(1, 1, 0, 1)
+	rebound_kick := rhythm_kick_response(1, 1, 0.45, 1)
+	late_kick := rhythm_kick_response(1, 1, 0.95, 1)
+	disabled_kick := rhythm_kick_response(1, 1, 0, 0)
+	assert(silent_kick.impact == 0 && silent_kick.rebound == 0)
+	assert(impact_kick.impact > 0.95 && impact_kick.rebound == 0)
+	assert(rebound_kick.rebound > rebound_kick.impact)
+	assert(late_kick.impact < rebound_kick.impact && late_kick.rebound < rebound_kick.rebound)
+	assert(disabled_kick.impact == 0 && disabled_kick.rebound == 0)
 	mouse_step := smooth_mouse_lane(0, 1, 1.0 / 60.0)
 	assert(
 		mouse_step > 0.32 && mouse_step < 1,
@@ -531,7 +541,7 @@ audio_fx_strength = 0.33
 		dive2[i].width = 4.8
 		dive2[i].pace = 1
 	}
-	dcam := ride_camera(dive2, 50, 0, 0, 0, 0, 0)
+	dcam := ride_camera(dive2, 50, 0, 0, 0, 0, 0, {})
 	dbase_x := dive2[50].curve_x
 	dbase_y := dive2[50].curve_y
 	dbase_z := dive2[50].curve_z

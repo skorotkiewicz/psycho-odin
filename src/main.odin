@@ -299,6 +299,8 @@ main :: proc() {
 		energy := nodes[current].bass * 0.6 + nodes[current].mid * 0.3 + nodes[current].high * 0.1
 		pace_now := nodes[current].pace
 		pace_curve := pace_now * pace_now * (3 - 2 * pace_now)
+		rhythm_accent := max(nodes[current].onset, nodes[current].beat)
+		rhythm := rhythm_kick_response(rhythm_accent, nodes[current].bass, fraction, visual_amount)
 		rl.BeginTextureMode(scene)
 		rl.ClearBackground(rl.BLACK)
 		draw_music_background(
@@ -313,7 +315,7 @@ main :: proc() {
 			pulse,
 			visual_amount,
 		)
-		draw_ride(nodes, current, fraction, player_lane, steer_lean, pulse, shake)
+		draw_ride(nodes, current, fraction, player_lane, steer_lean, pulse, shake, rhythm)
 		rl.EndTextureMode()
 
 		shader_time := f32(rl.GetTime())
