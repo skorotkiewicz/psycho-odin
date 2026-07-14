@@ -16,8 +16,17 @@ Cache_Header :: struct {
 	version, count: u32,
 }
 
-cache_path :: proc(file_bytes: []byte) -> string {
-	return fmt.aprintf(".psycho_cache/%016x.map", hash.fnv64a(file_bytes, u64(MAP_VERSION)))
+cache_path :: proc(file_bytes: []byte, speed_limit: int = -1) -> string {
+	checksum := hash.fnv64a(file_bytes, u64(MAP_VERSION))
+	if speed_limit < 0 {
+		return fmt.aprintf(".psycho_cache/%016x.map", checksum)
+	}
+	normalized_limit := clamp(
+		speed_limit,
+		int(TRACK_MIN_SPEED_PERCENT),
+		int(TRACK_MAX_SPEED_PERCENT),
+	)
+	return fmt.aprintf(".psycho_cache/%016x-speed-%d.map", checksum, normalized_limit)
 }
 
 save_map :: proc(path: string, nodes: []Track_Node) -> bool {
@@ -47,7 +56,11 @@ load_map :: proc(path: string) -> (nodes: []Track_Node, ok: bool) {
 	return nodes, true
 }
 
-analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int) -> []Track_Node {
+analyze_samples :: proc(
+	samples: [^]f32,
+	frame_count, sample_rate, channels: int,
+	speed_limit: int = -1,
+) -> []Track_Node {
 	frames_per_node := max(1, int(f32(sample_rate) * STEP))
 	count := max(1, (frame_count + frames_per_node - 1) / frames_per_node)
 	nodes := make([]Track_Node, count)
@@ -244,16 +257,22 @@ analyze_samples :: proc(samples: [^]f32, frame_count, sample_rate, channels: int
 		nodes[node_i].pace = clamp(pace, 0, 1)
 	}
 
-	compose_track(nodes, song_seed)
+	compose_track(nodes, song_seed, speed_limit)
 	return nodes
 }
 
-analyze_file :: proc(path: cstring) -> []Track_Node {
+analyze_file :: proc(path: cstring, speed_limit: int = -1) -> []Track_Node {
 	wave := rl.LoadWave(path)
 	if !rl.IsWaveValid(wave) do return nil
 	defer rl.UnloadWave(wave)
 	samples := rl.LoadWaveSamples(wave)
 	if samples == nil do return nil
 	defer rl.UnloadWaveSamples(samples)
-	return analyze_samples(samples, int(wave.frameCount), int(wave.sampleRate), int(wave.channels))
+	return analyze_samples(
+		samples,
+		int(wave.frameCount),
+		int(wave.sampleRate),
+		int(wave.channels),
+		speed_limit,
+	)
 }

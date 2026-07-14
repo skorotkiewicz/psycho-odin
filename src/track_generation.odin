@@ -3,6 +3,28 @@ package main
 import "core:math"
 
 ROAD_STEP :: f32(5.5)
+TRACK_MIN_SPEED_PERCENT :: f32(52)
+TRACK_SPEED_RANGE_PERCENT :: f32(275)
+TRACK_MAX_SPEED_PERCENT :: TRACK_MIN_SPEED_PERCENT + TRACK_SPEED_RANGE_PERCENT
+
+track_speed_multiplier :: proc(pace: f32, speed_limit: int = -1) -> f32 {
+	p := clamp(pace, 0, 1)
+	pace_curve := p * p * (3 - 2 * p)
+	multiplier := (TRACK_MIN_SPEED_PERCENT + pace_curve * TRACK_SPEED_RANGE_PERCENT) / 100
+	if speed_limit >= 0 {
+		normalized_limit := clamp(
+			speed_limit,
+			int(TRACK_MIN_SPEED_PERCENT),
+			int(TRACK_MAX_SPEED_PERCENT),
+		)
+		multiplier = min(multiplier, f32(normalized_limit) / 100)
+	}
+	return multiplier
+}
+
+track_speed_percent :: proc(pace: f32, speed_limit: int = -1) -> f32 {
+	return track_speed_multiplier(pace, speed_limit) * 100
+}
 
 PICKUP :: i32(1)
 HAZARD :: i32(2)
@@ -34,7 +56,7 @@ Track_Node :: struct {
 	section, feature: i32,
 }
 
-compose_track :: proc(nodes: []Track_Node, song_seed: u32) {
+compose_track :: proc(nodes: []Track_Node, song_seed: u32, speed_limit: int = -1) {
 	count := len(nodes)
 	// Third pass composes six-second musical movements into a true 3D centerline.
 	SECTION_LENGTH :: 64
@@ -130,7 +152,7 @@ compose_track :: proc(nodes: []Track_Node, song_seed: u32) {
 		)
 		heading = heading * 0.80 + heading_target * 0.20
 		pitch = pitch * 0.78 + pitch_target * 0.22
-		step_distance := ROAD_STEP * (0.52 + pace_curve * 2.75)
+		step_distance := ROAD_STEP * track_speed_multiplier(node.pace, speed_limit)
 		horizontal_step := f32(math.cos(f64(pitch))) * step_distance
 		center_x += f32(math.sin(f64(heading))) * horizontal_step
 		center_y += f32(math.sin(f64(pitch))) * step_distance

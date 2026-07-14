@@ -479,12 +479,41 @@ hide_cursor = false
 music_volume = 2.0 # must clamp
 visual_fx = false
 audio_fx_strength = 0.33
+speed_limit = 250
 `,
 	)
 	assert(abs(config_test.mouse_response - 31) < 0.001)
 	assert(!config_test.hide_cursor && !config_test.visual_fx)
 	assert(abs(config_test.music_volume - 0.8) < 0.001)
 	assert(abs(config_test.audio_fx_strength - 0.33) < 0.001)
+	assert(config_test.speed_limit == 250)
+	assert(default_game_config().speed_limit == -1)
+	assert(abs(track_speed_percent(1, -1) - 327) < 0.001)
+	assert(abs(track_speed_percent(1, 250) - 250) < 0.001)
+	assert(abs(track_speed_percent(0, 250) - 52) < 0.001)
+	assert(abs(track_speed_multiplier(1, 250) - 2.5) < 0.001)
+	unlimited_speed_track := make([]Track_Node, 32)
+	limited_speed_track := make([]Track_Node, 32)
+	defer delete(unlimited_speed_track)
+	defer delete(limited_speed_track)
+	for i in 0 ..< len(unlimited_speed_track) {
+		unlimited_speed_track[i].pace = 1
+		limited_speed_track[i].pace = 1
+	}
+	compose_track(unlimited_speed_track, 1234, -1)
+	compose_track(limited_speed_track, 1234, 250)
+	assert(
+		limited_speed_track[len(limited_speed_track) - 1].distance <
+		unlimited_speed_track[len(unlimited_speed_track) - 1].distance * 0.85,
+		"the configured limit must reduce physical track travel, not only the HUD",
+	)
+	cache_fixture := [4]byte{0x50, 0x53, 0x59, 0x43}
+	unlimited_cache_path := cache_path(cache_fixture[:], -1)
+	limited_cache_path := cache_path(cache_fixture[:], 250)
+	assert(unlimited_cache_path != limited_cache_path)
+	assert(strings.contains(limited_cache_path, "-speed-250.map"))
+	delete(unlimited_cache_path)
+	delete(limited_cache_path)
 	result_test := format_game_result(123, "music/test.wav", 4567, 12, 3, 98.5)
 	assert(strings.contains(result_test, "\t4567\t12\t3\t98.50"))
 	delete(result_test)

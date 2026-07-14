@@ -128,6 +128,7 @@ design background, see [MORE.md](MORE.md).
 Startup preferences live in [config.toml](config.toml):
 
 - mouse response and cursor hiding;
+- optional maximum track speed (`-1` keeps it unlimited);
 - music volume;
 - psychedelic post-processing and visual strength;
 - experimental stereo/headphone processing and its strength.

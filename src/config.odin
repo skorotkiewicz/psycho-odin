@@ -11,6 +11,7 @@ Game_Config :: struct {
 	music_volume:      f32,
 	visual_strength:   f32,
 	audio_fx_strength: f32,
+	speed_limit:       int,
 	visual_fx:         bool,
 	audio_fx:          bool,
 	hide_cursor:       bool,
@@ -24,6 +25,7 @@ default_game_config :: proc() -> Game_Config {
 		music_volume = 0.65,
 		visual_strength = 0.65,
 		audio_fx_strength = 0.22,
+		speed_limit = -1,
 		visual_fx = true,
 		audio_fx = false,
 		hide_cursor = true,
@@ -52,6 +54,8 @@ parse_game_config :: proc(text: string) -> Game_Config {
 			if parsed, ok := strconv.parse_f32(value); ok do config.visual_strength = parsed
 		case "audio_fx_strength":
 			if parsed, ok := strconv.parse_f32(value); ok do config.audio_fx_strength = parsed
+		case "speed_limit":
+			if parsed, ok := strconv.parse_int(value); ok do config.speed_limit = parsed
 		case "visual_fx":
 			if parsed, ok := strconv.parse_bool(value); ok do config.visual_fx = parsed
 		case "audio_fx":
@@ -64,6 +68,14 @@ parse_game_config :: proc(text: string) -> Game_Config {
 	config.music_volume = clamp(config.music_volume, 0, 0.8)
 	config.visual_strength = clamp(config.visual_strength, 0, 1)
 	config.audio_fx_strength = clamp(config.audio_fx_strength, 0, 0.5)
+	if config.speed_limit < -1 do config.speed_limit = -1
+	if config.speed_limit >= 0 {
+		config.speed_limit = clamp(
+			config.speed_limit,
+			int(TRACK_MIN_SPEED_PERCENT),
+			int(TRACK_MAX_SPEED_PERCENT),
+		)
+	}
 	return config
 }
 

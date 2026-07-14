@@ -20,6 +20,7 @@ main :: proc() {
 		return
 	}
 
+	config := load_game_config("config.toml")
 	audio_path := os.args[1]
 	if analyze_only do audio_path = os.args[2]
 	file_bytes, file_err := os.read_entire_file(audio_path, context.allocator)
@@ -27,7 +28,7 @@ main :: proc() {
 		fmt.eprintfln("psycho: cannot read %q: %v", audio_path, file_err)
 		return
 	}
-	map_path := cache_path(file_bytes)
+	map_path := cache_path(file_bytes, config.speed_limit)
 	delete(file_bytes)
 	defer delete(map_path)
 	path_c := strings.clone_to_cstring(audio_path, context.temp_allocator)
@@ -39,7 +40,7 @@ main :: proc() {
 		fmt.println(
 			"map: listening for movements, beats, climbs, drops and strange little roads...",
 		)
-		nodes = analyze_file(path_c)
+		nodes = analyze_file(path_c, config.speed_limit)
 		if len(nodes) == 0 {
 			fmt.eprintln("psycho: unsupported or invalid audio file")
 			return
@@ -75,7 +76,6 @@ main :: proc() {
 		fmt.println("map: analysis complete")
 		return
 	}
-	config := load_game_config("config.toml")
 	map_bounds := calculate_course_map_bounds(nodes)
 
 	rl.SetConfigFlags({.MSAA_4X_HINT, .VSYNC_HINT, .WINDOW_RESIZABLE})
@@ -311,7 +311,6 @@ main :: proc() {
 		}
 		energy := nodes[current].bass * 0.6 + nodes[current].mid * 0.3 + nodes[current].high * 0.1
 		pace_now := nodes[current].pace
-		pace_curve := pace_now * pace_now * (3 - 2 * pace_now)
 		rhythm := Rhythm_Motion {
 			kick = rhythm_kick_response(
 				max(nodes[current].onset, nodes[current].beat),
@@ -385,7 +384,7 @@ main :: proc() {
 			rl.TextFormat(
 				"%s  SPEED %.0f%%",
 				section_names[nodes[current].section],
-				52 + pace_curve * 275,
+				track_speed_percent(pace_now, config.speed_limit),
 			),
 			w - 210,
 			96,
