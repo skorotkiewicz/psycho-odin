@@ -5,7 +5,13 @@ import "core:os"
 import "core:strings"
 import rl "vendor:raylib"
 
+PSYCHO_VERSION :: #load("../VERSION")
+
 main :: proc() {
+	if len(os.args) == 2 && os.args[1] == "--version" {
+		fmt.printfln("psycho %s", strings.trim_space(string(PSYCHO_VERSION)))
+		return
+	}
 	if len(os.args) == 2 && os.args[1] == "--self-test" {
 		self_test()
 		return
@@ -15,7 +21,8 @@ main :: proc() {
 		fmt.eprintln(
 			"usage: ./psycho <music.wav|mp3|ogg|flac>\n" +
 			"       ./psycho --analyze <music.wav|mp3|ogg|flac>\n" +
-			"       ./psycho --self-test",
+			"       ./psycho --self-test\n" +
+			"       ./psycho --version",
 		)
 		return
 	}

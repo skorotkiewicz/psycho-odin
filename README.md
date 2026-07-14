@@ -76,6 +76,7 @@ The first run performs the deeper offline analysis. Generated maps are stored in
 ```sh
 ./psycho --analyze ~/Music/your-song.ogg  # build the map without opening a window
 ./psycho --self-test                     # verify analysis and road geometry
+./psycho --version                       # print the installed game version
 ```
 
 ## Controls
