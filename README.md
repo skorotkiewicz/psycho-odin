@@ -89,7 +89,7 @@ The first run performs the deeper offline analysis. Generated maps are stored in
 | Cycle ride HUD: full / hidden / map only | `F3` |
 | Toggle psychedelic post-process | `P` |
 | Visual strength | `,` / `.` |
-| Toggle experimental headphone FX | `B` |
+| Toggle binaural headphone FX | `B` |
 | Headphone FX strength | `[` / `]` |
 | Music volume | `-` / `+` |
 | Ride again from results | `R` |
@@ -135,7 +135,7 @@ Startup preferences live in [config.toml](config.toml):
 - optional maximum track speed (`-1` keeps it unlimited);
 - music volume;
 - psychedelic post-processing and visual strength;
-- experimental stereo/headphone processing and its strength.
+- binaural stereo/headphone processing and its strength.
 
 Keyboard shortcuts still adjust the live session without rewriting the file.
 
@@ -159,9 +159,9 @@ just build       # optimized release build
 ./psycho --self-test
 ```
 
-The deterministic self-test exercises audio analysis, tempo response, climbs and
-drops, left/right curvature, loop closure, camera continuity, and near-camera
-road safety.
+The deterministic self-test exercises the binaural DSP dry path, ramps and
+headroom alongside audio analysis, tempo response, climbs and drops, left/right
+curvature, loop closure, camera continuity, and near-camera road safety.
 
 ## Inspiration and comfort
 
@@ -170,7 +170,7 @@ beautiful central idea: the song should determine the road, its mood, and its
 speed. Its analyzer, closed-loop course generation, continuous steering,
 scoring, and visual effects are original implementations.
 
-The headphone effect is experimental entertainment, not treatment. Keep volume
+The headphone effect is for entertainment, not treatment. Keep volume
 comfortable, use stereo headphones only if you enjoy the effect, and press `P`
 to disable visual distortion whenever it feels unpleasant. Detailed references
 and safety notes are collected in [MORE.md](MORE.md).

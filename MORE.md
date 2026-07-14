@@ -38,13 +38,13 @@ overdrive and stronger visual effects.
 Controls: move the mouse horizontally, or use `A/D` or arrows, to steer. The
 most recently used device takes control, so switching is seamless. `Space`
 pauses, `F` toggles fullscreen, `P` toggles the psychedelic post-process,
-`,`/`.` changes visual strength, `B` toggles experimental binaural/spatial
+`,`/`.` changes visual strength, `B` toggles binaural/spatial
 audio, `[`/`]` changes audio-effect strength, and `-`/`+` changes volume.
 The cursor is hidden during a live ride and shown while paused or on the result
 screen. Stereo headphones are required for the binaural effect.
 
 Startup defaults live in `config.toml`: mouse response, cursor hiding, music
-volume, visual FX/strength, and experimental audio FX/strength. Completed rides
+volume, visual FX/strength, and binaural audio FX/strength. Completed rides
 show score, best streak, and crashes, then append one timestamped record to
 `.games/results.tsv`. Press `R` from the result screen to start a fresh run.
 

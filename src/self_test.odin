@@ -66,6 +66,9 @@ fast_camera_min_y :: proc(nodes: []Track_Node) -> (min_y: f32, sample_count: int
 }
 
 self_test :: proc() {
+	audio_fx_self_test()
+	fmt.println("self-test: binaural audio dry path, ramps and headroom ok")
+
 	rate := 8000
 	samples := make([]f32, rate * 24)
 	defer delete(samples)

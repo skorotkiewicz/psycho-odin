@@ -9,6 +9,6 @@ music_volume = 0.65
 visual_fx = true
 visual_strength = 0.65
 
-# Experimental headphone effect.
+# Binaural stereo headphone effect.
 audio_fx = true
 audio_fx_strength = 0.5

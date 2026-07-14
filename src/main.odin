@@ -121,11 +121,16 @@ main :: proc() {
 	music_duration := rl.GetMusicTimeLength(music)
 	volume := config.music_volume
 	rl.SetMusicVolume(music, volume)
-	fx_on = config.audio_fx
-	fx_amount = config.audio_fx_strength
-	fx_rate = f64(music.sampleRate)
-	fx_channels = int(music.channels)
-	if fx_channels >= 2 {
+	audio_fx_enabled := config.audio_fx
+	audio_fx_amount := config.audio_fx_strength
+	audio_fx_channels := int(music.channels)
+	audio_fx_initialize(
+		audio_fx_enabled,
+		audio_fx_amount,
+		f32(music.sampleRate),
+		audio_fx_channels,
+	)
+	if audio_fx_channels >= 2 {
 		rl.AttachAudioStreamProcessor(music.stream, audio_fx)
 		defer rl.DetachAudioStreamProcessor(music.stream, audio_fx)
 	}
@@ -158,15 +163,24 @@ main :: proc() {
 			if paused do rl.PauseMusicStream(music)
 			else do rl.ResumeMusicStream(music)
 		}
-		if rl.IsKeyPressed(.B) && fx_channels >= 2 do fx_on = !fx_on
+		if rl.IsKeyPressed(.B) && audio_fx_channels >= 2 {
+			audio_fx_enabled = !audio_fx_enabled
+			audio_fx_set_enabled(audio_fx_enabled)
+		}
 		if rl.IsKeyPressed(.P) do visual_fx = !visual_fx
 		if rl.IsKeyPressed(.COMMA) do visual_amount = max(0, visual_amount - 0.1)
 		if rl.IsKeyPressed(.PERIOD) do visual_amount = min(1, visual_amount + 0.1)
 		if rl.IsKeyPressed(.F) do rl.ToggleFullscreen()
 		if rl.IsKeyPressed(.F2) do show_fps = !show_fps
 		if rl.IsKeyPressed(.F3) do hud_mode = next_hud_mode(hud_mode)
-		if rl.IsKeyPressed(.LEFT_BRACKET) do fx_amount = max(0, fx_amount - 0.05)
-		if rl.IsKeyPressed(.RIGHT_BRACKET) do fx_amount = min(0.5, fx_amount + 0.05)
+		if rl.IsKeyPressed(.LEFT_BRACKET) {
+			audio_fx_amount = max(0, audio_fx_amount - 0.05)
+			audio_fx_set_amount(audio_fx_amount)
+		}
+		if rl.IsKeyPressed(.RIGHT_BRACKET) {
+			audio_fx_amount = min(AUDIO_FX_MAX_AMOUNT, audio_fx_amount + 0.05)
+			audio_fx_set_amount(audio_fx_amount)
+		}
 		if rl.IsKeyPressed(.MINUS) {
 			volume = max(0, volume - 0.05)
 			rl.SetMusicVolume(music, volume)
@@ -188,7 +202,8 @@ main :: proc() {
 				ghost_pilot = !ghost_pilot
 				if ghost_pilot {
 					overdrive = max(overdrive, SECRET_OVERDRIVE_SECONDS)
-					pulse, fx_tingle = 1, 1
+					pulse = 1
+					audio_fx_trigger_tingle()
 					rhythm_push.impact = 1
 					rhythm_push.velocity = max(rhythm_push.velocity, 4.2)
 					fmt.println("PSYCHO: GHOST PILOT ENGAGED")
@@ -274,7 +289,7 @@ main :: proc() {
 						score += int(120 * node.beat + 25) * multiplier
 						best_streak = max(best_streak, streak)
 						pulse = 1
-						fx_tingle = 1
+						audio_fx_trigger_tingle()
 					} else {
 						streak = 0
 						color_chain = 0
@@ -293,8 +308,10 @@ main :: proc() {
 					shield, score, streak = outcome.shield, outcome.score, outcome.streak
 					color_chain, last_tone, crashes =
 						outcome.color_chain, outcome.last_tone, outcome.crashes
-					if outcome.blocked do pulse, fx_tingle = 1, 1
-					else do shake, pulse = 1, 1
+					if outcome.blocked {
+						pulse = 1
+						audio_fx_trigger_tingle()
+					} else do shake, pulse = 1, 1
 				} else if node.kind == SHIELD && aligned {
 					shield = min(3, shield + 1)
 					score += 300
@@ -302,7 +319,8 @@ main :: proc() {
 				} else if node.kind == BOOST && aligned {
 					overdrive = max(overdrive, 6)
 					score += 500
-					pulse, fx_tingle = 1, 1
+					pulse = 1
+					audio_fx_trigger_tingle()
 				}
 			}
 			last_index = current
@@ -316,8 +334,7 @@ main :: proc() {
 		pulse = max(0, pulse - dt * 2.8)
 		shake = max(0, shake - dt * 4.5)
 		overdrive = max(0, overdrive - dt)
-		fx_tingle = max(0, fx_tingle - dt * 2.0)
-		fx_beat_hz = 4.0 + f64(nodes[current].bass) * 6.0
+		audio_fx_set_beat_hz(4 + nodes[current].bass * 6)
 		music_playing := rl.IsMusicStreamPlaying(music)
 		if music_playing do playback_seen = true
 		finished = ride_finished(paused, playback_seen, music_playing)
@@ -335,6 +352,7 @@ main :: proc() {
 		}
 		if finished && rl.IsKeyPressed(.R) {
 			rl.SeekMusicStream(music, 0)
+			audio_fx_request_reset()
 			rl.PlayMusicStream(music)
 			playback_seen = rl.IsMusicStreamPlaying(music)
 			last_index, score, streak, best_streak, color_chain, last_tone, crashes =
@@ -475,9 +493,12 @@ main :: proc() {
 					rl.Color{255, 100, 50, 255},
 				)
 			}
-			fx_label: cstring = "EXPERIMENTAL FX: OFF [B]"
-			if fx_channels < 2 do fx_label = "EXPERIMENTAL FX: NEEDS STEREO"
-			if fx_on do fx_label = rl.TextFormat("EXPERIMENTAL FX: %.0f%% [B]", fx_amount * 100)
+			fx_label: cstring = "BINAURAL FX: OFF [B]"
+			if audio_fx_channels < 2 {
+				fx_label = "BINAURAL FX: NEEDS STEREO"
+			} else if audio_fx_enabled {
+				fx_label = rl.TextFormat("BINAURAL FX: %.0f%% [B]", audio_fx_amount * 100)
+			}
 			rl.DrawText(fx_label, 24, h - 58, 17, rl.Color{150, 190, 225, 255})
 			visual_label: cstring = "PSYCHO VISUAL: ON [P]"
 			if !visual_fx do visual_label = "PSYCHO VISUAL: OFF [P]"
