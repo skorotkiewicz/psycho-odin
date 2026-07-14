@@ -364,6 +364,22 @@ self_test :: proc() {
 	assert(high_background.sparkle > calm_background.sparkle)
 	assert(beat_background.beat_flash > calm_background.beat_flash)
 	assert(fast_background.drift > calm_background.drift)
+	palette_paces := [3]f32{0, 0.5, 1}
+	for pace in palette_paces {
+		road_hue := wrap_hue(pace_hue(pace))
+		lamp_hue := pace_opposite_hue(pace)
+		hue_distance := abs(lamp_hue - road_hue)
+		hue_distance = min(hue_distance, 360 - hue_distance)
+		assert(abs(hue_distance - 180) < 0.001, "streetlamps must oppose the road hue")
+	}
+	calm_bulb_radius := street_bulb_radius(0)
+	beat_bulb_radius := street_bulb_radius(1)
+	assert(
+		beat_bulb_radius > calm_bulb_radius * 1.5,
+		"street bulbs must grow visibly on the rhythm pulse",
+	)
+	assert(street_bulb_radius(-1) == calm_bulb_radius)
+	assert(street_bulb_radius(2) == beat_bulb_radius)
 	silent_kick := rhythm_kick_response(0, 1, 0, 1)
 	impact_kick := rhythm_kick_response(1, 1, 0, 1)
 	rebound_kick := rhythm_kick_response(1, 1, 0.45, 1)

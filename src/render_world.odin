@@ -3,6 +3,10 @@ package main
 import "core:math"
 import rl "vendor:raylib"
 
+street_bulb_radius :: proc(rhythm_pulse: f32) -> f32 {
+	return 0.30 + clamp(rhythm_pulse, 0, 1) * 0.20
+}
+
 Rhythm_Kick :: struct {
 	impact, rebound: f32,
 }
@@ -89,6 +93,17 @@ void main() {
     float scan = 0.96 + 0.04*sin(fragTexCoord.y*900.0);
     finalColor = vec4(color * (0.72 + 0.28*vignette) * scan, 1.0) * colDiffuse * fragColor;
 }`
+
+draw_street_bulb :: proc(position: rl.Vector3, pace, rhythm_pulse: f32) {
+	pulse := clamp(rhythm_pulse, 0, 1)
+	radius := street_bulb_radius(pulse)
+	glow_color := pace_opposite_color(pace, 1, 255)
+	aura_color := pace_opposite_color(pace, 0.72, 64 + u8(pulse * 56))
+	wire_color := pace_opposite_color(pace, 0.88, 235)
+	rl.DrawSphere(position, radius + 0.17 + pulse * 0.08, aura_color)
+	rl.DrawSphere(position, radius, glow_color)
+	rl.DrawSphereWires(position, radius + 0.035, 7, 7, wire_color)
+}
 
 ride_camera :: proc(
 	nodes: []Track_Node,
@@ -350,7 +365,6 @@ draw_ride :: proc(
 				)
 			}
 		}
-
 		if node.kind != 0 && course_segment > 1 {
 			object := road_point(
 				nodes,
@@ -391,20 +405,30 @@ draw_ride :: proc(
 		if !is_rear_skirt && i % 6 == 0 {
 			panel_height := 1.5 + node.energy * 3.5 + node.pace * 1.8
 			panel_color := pace_color(node.pace, 0.34 + node.pace * 0.35, 135)
+			left_panel := rl.Vector3{left.x - 1.25, left.y + panel_height * 0.38, center.z}
+			right_panel := rl.Vector3{right.x + 1.25, right.y + panel_height * 0.38, center.z}
 			rl.DrawCube(
-				{left.x - 1.25, left.y + panel_height * 0.38, center.z},
+				left_panel,
 				0.22,
 				panel_height,
 				1.7,
 				panel_color,
 			)
 			rl.DrawCube(
-				{right.x + 1.25, right.y + panel_height * 0.38, center.z},
+				right_panel,
 				0.22,
 				panel_height,
 				1.7,
 				panel_color,
 			)
+			bulb_lift := panel_height * 0.50 + 0.12
+			left_bulb := left_panel
+			right_bulb := right_panel
+			left_bulb.y += bulb_lift
+			right_bulb.y += bulb_lift
+			lamp_pulse := max(rhythm.kick.impact, rhythm.push.impact)
+			draw_street_bulb(left_bulb, node.pace, lamp_pulse)
+			draw_street_bulb(right_bulb, node.pace, lamp_pulse)
 		}
 		if !is_rear_skirt && i % 5 == 0 {
 			star_x := f32(((i * 73) % 31) - 15) * 1.6

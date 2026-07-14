@@ -2,12 +2,34 @@ package main
 
 import rl "vendor:raylib"
 
+pace_hue :: proc(pace: f32) -> f32 {
+	p := clamp(pace, 0, 1)
+	heat := p * p * (3 - 2 * p)
+	return 195 + heat * 187
+}
+
+wrap_hue :: proc(hue: f32) -> f32 {
+	wrapped := hue
+	for wrapped >= 360 do wrapped -= 360
+	for wrapped < 0 do wrapped += 360
+	return wrapped
+}
+
+pace_opposite_hue :: proc(pace: f32) -> f32 {
+	return wrap_hue(pace_hue(pace) + 180)
+}
+
 pace_color :: proc(pace, value: f32, alpha: u8 = 255) -> rl.Color {
 	// Cool cyan climbs travel through violet into hot gold/red descents.
 	p := clamp(pace, 0, 1)
-	heat := p * p * (3 - 2 * p)
-	hue := 195 + heat * 187
-	color := rl.ColorFromHSV(hue, 0.62 + p * 0.34, clamp(value, 0, 1))
+	color := rl.ColorFromHSV(pace_hue(p), 0.62 + p * 0.34, clamp(value, 0, 1))
+	color.a = alpha
+	return color
+}
+
+pace_opposite_color :: proc(pace, value: f32, alpha: u8 = 255) -> rl.Color {
+	p := clamp(pace, 0, 1)
+	color := rl.ColorFromHSV(pace_opposite_hue(p), 0.62 + p * 0.34, clamp(value, 0, 1))
 	color.a = alpha
 	return color
 }
