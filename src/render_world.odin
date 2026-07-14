@@ -4,7 +4,11 @@ import "core:math"
 import rl "vendor:raylib"
 
 street_bulb_radius :: proc(rhythm_pulse: f32) -> f32 {
-	return 0.30 + clamp(rhythm_pulse, 0, 1) * 0.20
+	return 0.60 + clamp(rhythm_pulse, 0, 1) * 0.40
+}
+
+street_bulb_aura_alpha :: proc(rhythm_pulse: f32) -> u8 {
+	return 128 + u8(clamp(rhythm_pulse, 0, 1) * 112)
 }
 
 Rhythm_Kick :: struct {
@@ -98,11 +102,11 @@ draw_street_bulb :: proc(position: rl.Vector3, pace, rhythm_pulse: f32) {
 	pulse := clamp(rhythm_pulse, 0, 1)
 	radius := street_bulb_radius(pulse)
 	glow_color := pace_opposite_color(pace, 1, 255)
-	aura_color := pace_opposite_color(pace, 0.72, 64 + u8(pulse * 56))
+	aura_color := pace_opposite_color(pace, 1, street_bulb_aura_alpha(pulse))
 	wire_color := pace_opposite_color(pace, 0.88, 235)
-	rl.DrawSphere(position, radius + 0.17 + pulse * 0.08, aura_color)
+	rl.DrawSphere(position, radius + 0.34 + pulse * 0.16, aura_color)
 	rl.DrawSphere(position, radius, glow_color)
-	rl.DrawSphereWires(position, radius + 0.035, 7, 7, wire_color)
+	rl.DrawSphereWires(position, radius + 0.07, 7, 7, wire_color)
 }
 
 ride_camera :: proc(

@@ -378,6 +378,11 @@ self_test :: proc() {
 		beat_bulb_radius > calm_bulb_radius * 1.5,
 		"street bulbs must grow visibly on the rhythm pulse",
 	)
+	assert(abs(calm_bulb_radius - 0.60) < 0.001)
+	assert(abs(beat_bulb_radius - 1.00) < 0.001)
+	assert(beat_bulb_radius < 1.25, "the solid street bulb must remain outside the road")
+	assert(street_bulb_aura_alpha(0) == 128)
+	assert(street_bulb_aura_alpha(1) == 240)
 	assert(street_bulb_radius(-1) == calm_bulb_radius)
 	assert(street_bulb_radius(2) == beat_bulb_radius)
 	silent_kick := rhythm_kick_response(0, 1, 0, 1)
