@@ -83,6 +83,7 @@ The first run performs the deeper offline analysis. Generated maps are stored in
 | Steer | Move the mouse horizontally, `A` / `D`, or arrow keys |
 | Pause / resume | `Space` |
 | Fullscreen | `F` |
+| Toggle FPS counter | `F2` |
 | Toggle psychedelic post-process | `P` |
 | Visual strength | `,` / `.` |
 | Toggle experimental headphone FX | `B` |

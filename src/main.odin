@@ -135,6 +135,7 @@ main :: proc() {
 
 	player_lane, steer_lean: f32
 	mouse_active := false
+	show_fps := false
 	last_index := 0
 	score, streak, best_streak, color_chain, crashes: int
 	last_tone: i32
@@ -159,6 +160,7 @@ main :: proc() {
 		if rl.IsKeyPressed(.COMMA) do visual_amount = max(0, visual_amount - 0.1)
 		if rl.IsKeyPressed(.PERIOD) do visual_amount = min(1, visual_amount + 0.1)
 		if rl.IsKeyPressed(.F) do rl.ToggleFullscreen()
+		if rl.IsKeyPressed(.F2) do show_fps = !show_fps
 		if rl.IsKeyPressed(.LEFT_BRACKET) do fx_amount = max(0, fx_amount - 0.05)
 		if rl.IsKeyPressed(.RIGHT_BRACKET) do fx_amount = min(0.5, fx_amount + 0.05)
 		if rl.IsKeyPressed(.MINUS) {
@@ -379,6 +381,13 @@ main :: proc() {
 			15,
 			rl.Color{180, 190, 215, 255},
 		)
+		if show_fps {
+			fps_label := rl.TextFormat("FPS %d", rl.GetFPS())
+			fps_width := rl.MeasureText(fps_label, 17)
+			fps_x := w - fps_width - 30
+			rl.DrawRectangle(fps_x - 8, 120, fps_width + 16, 25, rl.Color{2, 4, 16, 205})
+			rl.DrawText(fps_label, fps_x, 124, 17, rl.Color{80, 235, 255, 255})
+		}
 		section_names := [4]cstring{"CLIMB", "DROP", "SLALOM", "TUNNEL"}
 		rl.DrawText(
 			rl.TextFormat(
