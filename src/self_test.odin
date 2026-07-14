@@ -2,6 +2,8 @@ package main
 
 import "core:fmt"
 import "core:math"
+import "core:mem"
+import "core:os"
 import "core:strings"
 import rl "vendor:raylib"
 
@@ -65,10 +67,12 @@ fast_camera_min_y :: proc(nodes: []Track_Node) -> (min_y: f32, sample_count: int
 	return
 }
 
-self_test :: proc() {
+test_audio_fx :: proc() {
 	audio_fx_self_test()
-	fmt.println("self-test: binaural audio dry path, ramps and headroom ok")
+	fmt.println("self-test: audio fx ok")
+}
 
+test_track_and_geometry :: proc() {
 	rate := 8000
 	samples := make([]f32, rate * 24)
 	defer delete(samples)
@@ -351,9 +355,17 @@ self_test :: proc() {
 	)
 	fmt.printfln("self-test: camera loop-seam jump %.3f", seam_preview_jump)
 	assert(seam_preview_jump < 0.10, "camera preview must continue through the loop seam")
+	fmt.println("self-test: track and geometry ok")
+}
+
+test_gameplay_and_rendering :: proc() {
 	assert(abs(lane_position(4.8, 1) - 3.2) < 0.001)
 	assert(lane_aligned(0, 0))
 	assert(!lane_aligned(0, 1))
+	assert(lane_aligned(LANE_COLLISION_TOLERANCE - 0.001, 0))
+	assert(lane_aligned(-LANE_COLLISION_TOLERANCE + 0.001, 0))
+	assert(!lane_aligned(LANE_COLLISION_TOLERANCE, 0))
+	assert(!lane_aligned(-LANE_COLLISION_TOLERANCE, 0))
 	assert(steer_input(true, false) > 0, "A/left must move toward screen-left for a +Z camera")
 	assert(mouse_lane_target(0, 1000) > 0.99)
 	assert(abs(mouse_lane_target(500, 1000)) < 0.001)
@@ -643,6 +655,12 @@ self_test :: proc() {
 		crashing_hazard.crashes == 5,
 		"an unprotected final shield hit must still cause a crash",
 	)
+	fmt.println("self-test: gameplay and rendering ok")
+}
+
+test_config_and_speed :: proc() {
+	assert(game_config_key_known("speed_limit"))
+	assert(!game_config_key_known("speeed_limit"))
 	config_test := parse_game_config(
 		`
 mouse_response = 31.0
@@ -651,6 +669,7 @@ music_volume = 2.0 # must clamp
 visual_fx = false
 audio_fx_strength = 0.33
 speed_limit = 250
+speeed_limit = 52
 `,
 	)
 	assert(abs(config_test.mouse_response - 31) < 0.001)
@@ -658,11 +677,36 @@ speed_limit = 250
 	assert(abs(config_test.music_volume - 0.8) < 0.001)
 	assert(abs(config_test.audio_fx_strength - 0.33) < 0.001)
 	assert(config_test.speed_limit == 250)
+	clamped_config := parse_game_config(
+		`
+mouse_response = -100
+music_volume = -1
+visual_strength = 7
+audio_fx_strength = 9
+speed_limit = -99
+visual_fx = true
+audio_fx = true
+hide_cursor = true
+`,
+	)
+	assert(abs(clamped_config.mouse_response - 8) < 0.001)
+	assert(clamped_config.music_volume == 0)
+	assert(clamped_config.visual_strength == 1)
+	assert(clamped_config.audio_fx_strength == 0.5)
+	assert(clamped_config.speed_limit == -1)
+	assert(clamped_config.visual_fx && clamped_config.audio_fx && clamped_config.hide_cursor)
 	assert(default_game_config().speed_limit == -1)
 	assert(abs(track_speed_percent(1, -1) - 327) < 0.001)
 	assert(abs(track_speed_percent(1, 250) - 250) < 0.001)
 	assert(abs(track_speed_percent(0, 250) - 52) < 0.001)
 	assert(abs(track_speed_multiplier(1, 250) - 2.5) < 0.001)
+	pace_samples := [5]f32{0, 0.25, 0.5, 0.75, 1}
+	previous_speed := track_speed_multiplier(pace_samples[0], -1)
+	for pace in pace_samples[1:] {
+		current_speed := track_speed_multiplier(pace, -1)
+		assert(current_speed > previous_speed, "track speed must increase monotonically with pace")
+		previous_speed = current_speed
+	}
 	unlimited_speed_track := make([]Track_Node, 32)
 	limited_speed_track := make([]Track_Node, 32)
 	defer delete(unlimited_speed_track)
@@ -685,10 +729,28 @@ speed_limit = 250
 	assert(strings.contains(limited_cache_path, "-speed-250.map"))
 	delete(unlimited_cache_path)
 	delete(limited_cache_path)
-	result_test := format_game_result(123, "music/test.wav", 4567, 12, 3, 98.5)
+	result_test := format_game_result(123, "music/test.wav", 0xab, 4567, 12, 3, 98.5)
 	assert(strings.contains(result_test, "\t4567\t12\t3\t98.50"))
+	assert(strings.contains(result_test, "\t00000000000000ab\n"))
 	delete(result_test)
+	result_history :=
+		"completed_unix\tsong\tscore\tbest_streak\tcrashes\tduration_seconds\tsong_id\n" +
+		"1\t\"music/test.wav\"\t4000\t9\t2\t60.00\n" +
+		"2\t\"moved/test.wav\"\t7200\t12\t1\t60.00\t00000000000000ab\n" +
+		"3\t\"other.wav\"\t9000\t15\t0\t80.00\t00000000000000cd\n"
+	content_bests := personal_bests_from_results(result_history, 0xab, "renamed/test.wav")
+	assert(content_bests.has_song && content_bests.song_score == 7200)
+	assert(content_bests.has_overall && content_bests.overall_score == 9000)
+	legacy_bests := personal_bests_from_results(result_history, 0xee, "music/test.wav")
+	assert(legacy_bests.has_song && legacy_bests.song_score == 4000)
+	assert(beats_personal_best(7201, 7200, true))
+	assert(!beats_personal_best(7200, 7200, true))
+	assert(beats_personal_best(0, 0, false))
+	fmt.println("self-test: config and speed ok")
+}
 
+test_analysis_dynamics :: proc() {
+	rate := 8000
 	// Multi-second musical dynamics must produce opposite grades and visibly different speeds.
 	rhythm_samples := make([]f32, rate * 24)
 	defer delete(rhythm_samples)
@@ -817,9 +879,17 @@ speed_limit = 250
 	)
 	assert(dnear_s.y > dfar_s.y, "the road must recede upward to a horizon on a dive")
 	assert(dfar_s.y < f32(CAMERA_TEST_HEIGHT) * 0.85, "the dive horizon must stay on screen")
+	fmt.println("self-test: analysis dynamics and extreme camera ok")
+}
 
+test_map_cache :: proc() {
+	nodes := [3]Track_Node {
+		{curve_z = 1.25, heading = 0.1, pitch = -0.2, lane = -1},
+		{curve_z = 3.50, heading = 0.2, pitch = 0.3, lane = 0},
+		{curve_z = 7.75, heading = -0.4, pitch = 0.1, lane = 1},
+	}
 	path := ".psycho_cache/self-test.map"
-	assert(save_map(path, nodes))
+	assert(save_map(path, nodes[:]))
 	loaded, ok := load_map(path)
 	defer delete(loaded)
 	assert(ok && len(loaded) == len(nodes) && loaded[0].lane == nodes[0].lane)
@@ -829,5 +899,28 @@ speed_limit = 250
 		loaded[0].pitch == nodes[0].pitch,
 	)
 	assert(loaded[len(loaded) - 1].curve_z == nodes[len(nodes) - 1].curve_z)
+
+	bad_headers := [3]Cache_Header {
+		{magic = 0, version = MAP_VERSION, count = 1},
+		{magic = MAP_MAGIC, version = MAP_VERSION + 1, count = 1},
+		{magic = MAP_MAGIC, version = MAP_VERSION, count = 10_000_001},
+	}
+	for &bad_header in bad_headers {
+		assert(os.write_entire_file(path, mem.ptr_to_bytes(&bad_header)) == nil)
+		bad_nodes, bad_ok := load_map(path)
+		delete(bad_nodes)
+		assert(!bad_ok, "map cache must reject corrupt headers")
+	}
+	fmt.println("self-test: map cache ok")
+}
+
+self_test :: proc() {
+	fmt.println("self-test: starting 6 groups")
+	test_audio_fx()
+	test_track_and_geometry()
+	test_gameplay_and_rendering()
+	test_config_and_speed()
+	test_analysis_dynamics()
+	test_map_cache()
 	fmt.println("self-test: ok")
 }

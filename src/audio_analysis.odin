@@ -16,6 +16,10 @@ Cache_Header :: struct {
 	version, count: u32,
 }
 
+song_content_id :: proc(file_bytes: []byte) -> u64 {
+	return hash.fnv64a(file_bytes)
+}
+
 cache_path :: proc(file_bytes: []byte, speed_limit: int = -1) -> string {
 	checksum := hash.fnv64a(file_bytes, u64(MAP_VERSION))
 	if speed_limit < 0 {

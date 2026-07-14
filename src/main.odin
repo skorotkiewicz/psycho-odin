@@ -7,7 +7,33 @@ import rl "vendor:raylib"
 
 PSYCHO_VERSION :: #load("../VERSION")
 
+PSYCHO_USAGE_LINE :: "usage: psycho <music.wav|mp3|ogg|flac> | psycho -h"
+PSYCHO_USAGE ::
+	PSYCHO_USAGE_LINE +
+	"\n" +
+	"       psycho --analyze <music.wav|mp3|ogg|flac>\n" +
+	"       psycho --self-test\n" +
+	"       psycho --version\n" +
+	"       psycho --help\n\n" +
+	"options:\n" +
+	"  --analyze    build and cache the song map without opening a window\n" +
+	"  --self-test  run deterministic headless regression checks\n" +
+	"  --version    print the game version\n" +
+	"  --help, -h   show this help"
+
+print_usage :: proc(to_stderr: bool = false) {
+	if to_stderr {
+		fmt.eprintln(PSYCHO_USAGE)
+	} else {
+		fmt.println(PSYCHO_USAGE)
+	}
+}
+
 main :: proc() {
+	if len(os.args) == 2 && (os.args[1] == "--help" || os.args[1] == "-h") {
+		print_usage()
+		return
+	}
 	if len(os.args) == 2 && os.args[1] == "--version" {
 		fmt.printfln("psycho %s", strings.trim_space(string(PSYCHO_VERSION)))
 		return
@@ -18,12 +44,7 @@ main :: proc() {
 	}
 	analyze_only := len(os.args) == 3 && os.args[1] == "--analyze"
 	if len(os.args) != 2 && !analyze_only {
-		fmt.eprintln(
-			"usage: ./psycho <music.wav|mp3|ogg|flac>\n" +
-			"       ./psycho --analyze <music.wav|mp3|ogg|flac>\n" +
-			"       ./psycho --self-test\n" +
-			"       ./psycho --version",
-		)
+		fmt.eprintln(PSYCHO_USAGE_LINE)
 		return
 	}
 
@@ -35,6 +56,7 @@ main :: proc() {
 		fmt.eprintfln("psycho: cannot read %q: %v", audio_path, file_err)
 		return
 	}
+	song_id := song_content_id(file_bytes)
 	map_path := cache_path(file_bytes, config.speed_limit)
 	delete(file_bytes)
 	defer delete(map_path)
@@ -83,6 +105,7 @@ main :: proc() {
 		fmt.println("map: analysis complete")
 		return
 	}
+	personal_bests := load_personal_bests(song_id, audio_path)
 	map_bounds := calculate_course_map_bounds(nodes)
 
 	rl.SetConfigFlags({.MSAA_4X_HINT, .VSYNC_HINT, .WINDOW_RESIZABLE})
@@ -156,6 +179,7 @@ main :: proc() {
 	shield := 3
 	paused, finished: bool
 	results_saved, result_save_ok: bool
+	new_song_best, new_overall_best: bool
 	visual_fx := config.visual_fx
 	visual_amount := config.visual_strength
 	pulse, shake, overdrive: f32
@@ -346,16 +370,36 @@ main :: proc() {
 		if music_playing do playback_seen = true
 		finished = ride_finished(paused, playback_seen, music_playing)
 		if finished && !results_saved {
+			new_song_best = beats_personal_best(
+				score,
+				personal_bests.song_score,
+				personal_bests.has_song,
+			)
+			new_overall_best = beats_personal_best(
+				score,
+				personal_bests.overall_score,
+				personal_bests.has_overall,
+			)
 			result_save_ok = save_game_result(
 				audio_path,
+				song_id,
 				score,
 				best_streak,
 				crashes,
 				music_duration,
 			)
 			results_saved = true
-			if result_save_ok do fmt.printfln("result: saved %s", RESULTS_PATH)
-			else do fmt.eprintfln("result: could not save %s", RESULTS_PATH)
+			if result_save_ok {
+				if new_song_best {
+					personal_bests.song_score = score
+					personal_bests.has_song = true
+				}
+				if new_overall_best {
+					personal_bests.overall_score = score
+					personal_bests.has_overall = true
+				}
+				fmt.printfln("result: saved %s", RESULTS_PATH)
+			} else do fmt.eprintfln("result: could not save %s", RESULTS_PATH)
 		}
 		if finished && rl.IsKeyPressed(.R) {
 			rl.SeekMusicStream(music, 0)
@@ -371,6 +415,7 @@ main :: proc() {
 			ghost_pilot = false
 			finished = false
 			results_saved, result_save_ok = false, false
+			new_song_best, new_overall_best = false, false
 		}
 		should_hide_cursor := config.hide_cursor && !paused && !finished
 		if should_hide_cursor && !cursor_hidden {
@@ -549,7 +594,7 @@ main :: proc() {
 		if overlays.results {
 			rl.DrawRectangle(0, 0, w, h, rl.Color{0, 0, 0, 185})
 			panel_width := min(650, w - 40)
-			panel_height := min(330, h - 40)
+			panel_height := min(380, h - 40)
 			panel_x := (w - panel_width) / 2
 			panel_y := (h - panel_height) / 2
 			rl.DrawRectangle(panel_x, panel_y, panel_width, panel_height, rl.Color{3, 5, 20, 242})
@@ -597,6 +642,26 @@ main :: proc() {
 				20,
 				rl.Color{210, 220, 245, 255},
 			)
+			display_song_best := max(score, personal_bests.song_score)
+			display_overall_best := max(score, personal_bests.overall_score)
+			best_label := rl.TextFormat(
+				"SONG BEST  %08d     ALL-TIME  %08d",
+				display_song_best,
+				display_overall_best,
+			)
+			best_color := rl.Color{255, 215, 80, 255}
+			if new_overall_best {
+				best_label = "NEW SONG + ALL-TIME BEST"
+			} else if new_song_best {
+				best_label = "NEW SONG BEST"
+			}
+			rl.DrawText(
+				best_label,
+				w / 2 - rl.MeasureText(best_label, 19) / 2,
+				panel_y + 215,
+				19,
+				best_color,
+			)
 			save_label: cstring = "RESULT SAVE FAILED"
 			save_color := rl.Color{255, 90, 105, 255}
 			if result_save_ok {
@@ -606,14 +671,14 @@ main :: proc() {
 			rl.DrawText(
 				save_label,
 				w / 2 - rl.MeasureText(save_label, 17) / 2,
-				panel_y + 222,
+				panel_y + 253,
 				17,
 				save_color,
 			)
 			rl.DrawText(
 				"PRESS R TO RIDE AGAIN",
 				w / 2 - rl.MeasureText("PRESS R TO RIDE AGAIN", 20) / 2,
-				panel_y + 267,
+				panel_y + 315,
 				20,
 				rl.Color{130, 220, 255, 255},
 			)

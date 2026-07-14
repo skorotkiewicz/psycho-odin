@@ -43,8 +43,9 @@ of the entire ride.
   overdrive.
 - **Keyboard or mouse.** Switch naturally between horizontal mouse steering,
   `A`/`D`, and the arrow keys. The cursor disappears during the ride.
-- **Persistent results.** Every completed run gets a result screen and one entry
-  in `.games/results.tsv`.
+- **Persistent results and personal bests.** Every completed run gets a result
+  screen, content-matched song and all-time bests, and one entry in
+  `.games/results.tsv`.
 
 <p align="center">
   <img src="assets/screenshot-1.png" alt="A cool-colored climb with traffic and overdrive" width="49%">
@@ -84,6 +85,7 @@ The first run performs the deeper offline analysis. Generated maps are stored in
 ./psycho --analyze ~/Music/your-song.ogg  # build the map without opening a window
 ./psycho --self-test                     # verify analysis and road geometry
 ./psycho --version                       # print the installed game version
+./psycho --help                          # show command-line help
 ```
 
 ## Controls
@@ -146,6 +148,8 @@ Startup preferences live in [config.toml](config.toml):
 - binaural stereo/headphone processing and its strength.
 
 Keyboard shortcuts still adjust the live session without rewriting the file.
+Unknown configuration keys print a warning at startup, so typos do not fail
+silently.
 
 ## A complete run
 
@@ -154,8 +158,9 @@ Keyboard shortcuts still adjust the live session without rewriting the file.
 </p>
 
 The music stream does not loop. When the song ends, PSYCHO records the score,
-best streak, crashes, duration, song path, and completion time. Press `R` to ride
-the same course again.
+best streak, crashes, duration, song path, content ID, and completion time. The
+result screen marks new per-song and all-time records. Press `R` to ride the same
+course again.
 
 ## Development
 

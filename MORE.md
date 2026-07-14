@@ -44,8 +44,9 @@ The cursor is hidden during a live ride and shown while paused or on the result
 screen. Stereo headphones are required for the binaural effect.
 
 Startup defaults live in `config.toml`: mouse response, cursor hiding, music
-volume, visual FX/strength, and binaural audio FX/strength. Completed rides
-show score, best streak, and crashes, then append one timestamped record to
+volume, visual FX/strength, and binaural audio FX/strength. Unknown keys produce
+a startup warning. Completed rides show score, streak, crashes, and content-
+matched song/all-time personal bests, then append one timestamped record to
 `.games/results.tsv`. Press `R` from the result screen to start a fresh run.
 
 The audio layer is entertainment, not treatment. Research does not establish

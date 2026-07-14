@@ -17,6 +17,11 @@ Game_Config :: struct {
 	hide_cursor:       bool,
 }
 
+Personal_Bests :: struct {
+	overall_score, song_score: int,
+	has_overall, has_song:     bool,
+}
+
 RESULTS_PATH :: ".games/results.tsv"
 
 default_game_config :: proc() -> Game_Config {
@@ -32,7 +37,22 @@ default_game_config :: proc() -> Game_Config {
 	}
 }
 
-parse_game_config :: proc(text: string) -> Game_Config {
+game_config_key_known :: proc(key: string) -> bool {
+	switch key {
+	case "mouse_response",
+	     "music_volume",
+	     "visual_strength",
+	     "audio_fx_strength",
+	     "speed_limit",
+	     "visual_fx",
+	     "audio_fx",
+	     "hide_cursor":
+		return true
+	}
+	return false
+}
+
+parse_game_config :: proc(text: string, warn_unknown_keys: bool = false) -> Game_Config {
 	config := default_game_config()
 	remaining := text
 	for raw_line in strings.split_lines_iterator(&remaining) {
@@ -45,6 +65,12 @@ parse_game_config :: proc(text: string) -> Game_Config {
 		if equals_at <= 0 do continue
 		key := strings.trim_space(line[:equals_at])
 		value := strings.trim_space(line[equals_at + 1:])
+		if !game_config_key_known(key) {
+			if warn_unknown_keys {
+				fmt.eprintfln("config: warning: unknown key %q (ignored)", key)
+			}
+			continue
+		}
 		switch key {
 		case "mouse_response":
 			if parsed, ok := strconv.parse_f32(value); ok do config.mouse_response = parsed
@@ -83,28 +109,77 @@ load_game_config :: proc(path: string) -> Game_Config {
 	data, err := os.read_entire_file(path, context.allocator)
 	if err != nil do return default_game_config()
 	defer delete(data)
-	return parse_game_config(transmute(string)data)
+	return parse_game_config(transmute(string)data, true)
+}
+
+personal_bests_from_results :: proc(text: string, song_id: u64, song: string) -> Personal_Bests {
+	bests: Personal_Bests
+	quoted_song := fmt.aprintf("%q", song)
+	defer delete(quoted_song)
+	remaining := text
+	for raw_line in strings.split_lines_iterator(&remaining) {
+		line := strings.trim_space(raw_line)
+		if len(line) == 0 do continue
+		columns := strings.split(line, "\t")
+		if len(columns) >= 6 {
+			score, score_ok := strconv.parse_int(columns[2])
+			if score_ok && score >= 0 {
+				if !bests.has_overall || score > bests.overall_score {
+					bests.overall_score = score
+					bests.has_overall = true
+				}
+				same_song := false
+				if len(columns) >= 7 {
+					stored_song_id, id_ok := strconv.parse_u64(columns[6], 16)
+					same_song = id_ok && stored_song_id == song_id
+				} else {
+					// Results written before content IDs can still match until the file moves.
+					same_song = columns[1] == quoted_song
+				}
+				if same_song && (!bests.has_song || score > bests.song_score) {
+					bests.song_score = score
+					bests.has_song = true
+				}
+			}
+		}
+		delete(columns)
+	}
+	return bests
+}
+
+load_personal_bests :: proc(song_id: u64, song: string) -> Personal_Bests {
+	data, err := os.read_entire_file(RESULTS_PATH, context.allocator)
+	if err != nil do return {}
+	defer delete(data)
+	return personal_bests_from_results(transmute(string)data, song_id, song)
+}
+
+beats_personal_best :: proc(score, best: int, has_best: bool) -> bool {
+	return !has_best || score > best
 }
 
 format_game_result :: proc(
 	completed_unix: i64,
 	song: string,
+	song_id: u64,
 	score, best_streak, crashes: int,
 	duration_seconds: f32,
 ) -> string {
 	return fmt.aprintf(
-		"%d\t%q\t%d\t%d\t%d\t%.2f\n",
+		"%d\t%q\t%d\t%d\t%d\t%.2f\t%016x\n",
 		completed_unix,
 		song,
 		score,
 		best_streak,
 		crashes,
 		duration_seconds,
+		song_id,
 	)
 }
 
 save_game_result :: proc(
 	song: string,
+	song_id: u64,
 	score, best_streak, crashes: int,
 	duration_seconds: f32,
 ) -> bool {
@@ -119,7 +194,7 @@ save_game_result :: proc(
 	if existing_size == 0 {
 		_, err = os.write_string(
 			file,
-			"completed_unix\tsong\tscore\tbest_streak\tcrashes\tduration_seconds\n",
+			"completed_unix\tsong\tscore\tbest_streak\tcrashes\tduration_seconds\tsong_id\n",
 		)
 		if err != nil {
 			_ = os.close(file)
@@ -129,6 +204,7 @@ save_game_result :: proc(
 	line := format_game_result(
 		time.to_unix_seconds(time.now()),
 		song,
+		song_id,
 		score,
 		best_streak,
 		crashes,
