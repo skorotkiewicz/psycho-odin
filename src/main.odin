@@ -145,6 +145,7 @@ main :: proc() {
 	visual_fx := config.visual_fx
 	visual_amount := config.visual_strength
 	pulse, shake, overdrive: f32
+	rhythm_push: Rhythm_Push
 	for !rl.WindowShouldClose() {
 		rl.UpdateMusicStream(music)
 		dt := min(rl.GetFrameTime(), 0.05)
@@ -200,9 +201,14 @@ main :: proc() {
 		node_time := time_played / STEP
 		current := clamp(int(node_time), 0, len(nodes) - 1)
 		fraction := clamp(node_time - f32(current), 0, 1)
+		rhythm_impulse: f32
 		if current > last_index {
 			for i in last_index + 1 ..= current {
 				node := nodes[i]
+				rhythm_impulse = max(
+					rhythm_impulse,
+					rhythm_impulse_strength(max(node.onset, node.beat), node.bass, visual_amount),
+				)
 				aligned := abs(player_lane - f32(node.lane)) < 0.43
 				if node.kind == PICKUP {
 					if aligned {
@@ -248,6 +254,12 @@ main :: proc() {
 			}
 			last_index = current
 		}
+		rhythm_push = rhythm_push_step(
+			rhythm_push,
+			rhythm_impulse,
+			dt,
+			ride_controls_enabled(paused, finished),
+		)
 		pulse = max(0, pulse - dt * 2.8)
 		shake = max(0, shake - dt * 4.5)
 		overdrive = max(0, overdrive - dt)
@@ -276,6 +288,7 @@ main :: proc() {
 				0, 0, 0, 0, 0, -1, 0
 			shield = 3
 			overdrive = 0
+			rhythm_push = {}
 			finished = false
 			results_saved, result_save_ok = false, false
 		}
@@ -299,8 +312,15 @@ main :: proc() {
 		energy := nodes[current].bass * 0.6 + nodes[current].mid * 0.3 + nodes[current].high * 0.1
 		pace_now := nodes[current].pace
 		pace_curve := pace_now * pace_now * (3 - 2 * pace_now)
-		rhythm_accent := max(nodes[current].onset, nodes[current].beat)
-		rhythm := rhythm_kick_response(rhythm_accent, nodes[current].bass, fraction, visual_amount)
+		rhythm := Rhythm_Motion {
+			kick = rhythm_kick_response(
+				max(nodes[current].onset, nodes[current].beat),
+				nodes[current].bass,
+				fraction,
+				visual_amount,
+			),
+			push = rhythm_push,
+		}
 		rl.BeginTextureMode(scene)
 		rl.ClearBackground(rl.BLACK)
 		draw_music_background(

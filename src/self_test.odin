@@ -374,6 +374,40 @@ self_test :: proc() {
 	assert(rebound_kick.rebound > rebound_kick.impact)
 	assert(late_kick.impact < rebound_kick.impact && late_kick.rebound < rebound_kick.rebound)
 	assert(disabled_kick.impact == 0 && disabled_kick.rebound == 0)
+	silent_impulse := rhythm_impulse_strength(0, 1, 1)
+	soft_impulse := rhythm_impulse_strength(0.35, 0, 1)
+	strong_impulse := rhythm_impulse_strength(1, 1, 1)
+	disabled_impulse := rhythm_impulse_strength(1, 1, 0)
+	assert(silent_impulse == 0)
+	assert(strong_impulse > soft_impulse)
+	assert(disabled_impulse == 0)
+	push: Rhythm_Push
+	push = rhythm_push_step(push, strong_impulse, 1.0 / 60.0, true)
+	assert(push.impact > 0.95, "a strong beat must produce an immediate camera punch")
+	assert(push.rebound > 0.04 && push.velocity > 3, "a beat must launch the spring")
+	coasting_push := rhythm_push_step(push, 0, 1.0 / 60.0, true)
+	assert(coasting_push.impact < push.impact, "the sharp impact must decay")
+	assert(coasting_push.rebound > push.rebound, "the physical push must outlive the flash")
+	stacked_push := rhythm_push_step(push, strong_impulse, 1.0 / 60.0, true)
+	assert(
+		stacked_push.velocity > coasting_push.velocity,
+		"a second beat must add momentum instead of restarting an animation",
+	)
+	paused_push := rhythm_push_step(stacked_push, strong_impulse, 1.0 / 60.0, false)
+	assert(
+		paused_push == stacked_push,
+		"rhythm motion must freeze exactly while the ride is paused",
+	)
+	settled_push := push
+	for _ in 0 ..< 240 {
+		settled_push = rhythm_push_step(settled_push, 0, 1.0 / 60.0, true)
+	}
+	assert(
+		settled_push.impact == 0 &&
+		abs(settled_push.rebound) < 0.001 &&
+		abs(settled_push.velocity) < 0.001,
+		"rhythm motion must settle back to rest",
+	)
 	mouse_step := smooth_mouse_lane(0, 1, 1.0 / 60.0)
 	assert(
 		mouse_step > 0.32 && mouse_step < 1,
