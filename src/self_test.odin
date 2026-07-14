@@ -364,6 +364,9 @@ self_test :: proc() {
 	assert(high_background.sparkle > calm_background.sparkle)
 	assert(beat_background.beat_flash > calm_background.beat_flash)
 	assert(fast_background.drift > calm_background.drift)
+	assert(course_map_alpha(200, false) == 200)
+	assert(course_map_alpha(200, true) == 100)
+	assert(course_map_alpha(255, true) == 127)
 	palette_paces := [3]f32{0, 0.5, 1}
 	for pace in palette_paces {
 		road_hue := wrap_hue(pace_hue(pace))

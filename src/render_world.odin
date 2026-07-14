@@ -149,16 +149,15 @@ ride_camera :: proc(
 	turn_fov := min(11, abs(turn_preview) * 24)
 	pitch_fov := min(8, abs(pitch_preview) * 24)
 	camera_ground_y := -(player_x * 0.72) * base_bank
-	base_camera_y :=
-		max(
-			CHASE_CAMERA_MIN_Y,
-			camera_ground_y +
-			2.55 +
-			max(0, -base_pitch) * 12 +
-			abs(turn_preview) * 0.8 +
-			abs(pitch_preview) * 1.2 +
-			shake_y,
-		)
+	base_camera_y := max(
+		CHASE_CAMERA_MIN_Y,
+		camera_ground_y +
+		2.55 +
+		max(0, -base_pitch) * 12 +
+		abs(turn_preview) * 0.8 +
+		abs(pitch_preview) * 1.2 +
+		shake_y,
+	)
 	camera_y := max(
 		CHASE_CAMERA_MIN_Y,
 		base_camera_y + rhythm.kick.rebound * 0.14 + max(0, rhythm.push.rebound) * 0.32,
@@ -168,13 +167,12 @@ ride_camera :: proc(
 		position = {player_x * 0.72 + shake_x, camera_y, camera_z},
 		target = {target_x, target_y + 0.05, target_z},
 		up = {-camera_bank, 1, 0},
-		fovy =
-			66 +
-			pace_curve * 18 +
-			turn_fov +
-			pitch_fov +
-			rhythm.kick.impact * 2.8 +
-			rhythm.push.impact * 4.8,
+		fovy = 66 +
+		pace_curve * 18 +
+		turn_fov +
+		pitch_fov +
+		rhythm.kick.impact * 2.8 +
+		rhythm.push.impact * 4.8,
 		projection = .PERSPECTIVE,
 	}
 }
@@ -411,20 +409,8 @@ draw_ride :: proc(
 			panel_color := pace_color(node.pace, 0.34 + node.pace * 0.35, 135)
 			left_panel := rl.Vector3{left.x - 1.25, left.y + panel_height * 0.38, center.z}
 			right_panel := rl.Vector3{right.x + 1.25, right.y + panel_height * 0.38, center.z}
-			rl.DrawCube(
-				left_panel,
-				0.22,
-				panel_height,
-				1.7,
-				panel_color,
-			)
-			rl.DrawCube(
-				right_panel,
-				0.22,
-				panel_height,
-				1.7,
-				panel_color,
-			)
+			rl.DrawCube(left_panel, 0.22, panel_height, 1.7, panel_color)
+			rl.DrawCube(right_panel, 0.22, panel_height, 1.7, panel_color)
 			bulb_lift := panel_height * 0.50 + 0.12
 			left_bulb := left_panel
 			right_bulb := right_panel
@@ -458,15 +444,11 @@ draw_ride :: proc(
 		rhythm.push.rebound * 0.82
 	ship_z := rhythm.push.impact * 0.18 + rhythm.push.rebound * 0.78
 	ship_color := pace_color(
-		max(
-			0.48,
-			pace + pulse * 0.18 + rhythm.kick.impact * 0.10 + rhythm.push.impact * 0.07,
-		),
+		max(0.48, pace + pulse * 0.18 + rhythm.kick.impact * 0.10 + rhythm.push.impact * 0.07),
 		1,
 	)
 	trail_count := 9 + int(pace_curve * 14)
-	trail_spacing :=
-		0.52 + pace * 0.28 + rhythm.kick.impact * 0.22 + rhythm.push.impact * 0.42
+	trail_spacing := 0.52 + pace * 0.28 + rhythm.kick.impact * 0.22 + rhythm.push.impact * 0.42
 	for trail in 1 ..= trail_count {
 		alpha := u8(max(7, 125 / trail))
 		trail_color := pace_color(pace, 1, alpha)

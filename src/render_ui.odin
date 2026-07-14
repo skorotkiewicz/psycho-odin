@@ -34,6 +34,11 @@ pace_opposite_color :: proc(pace, value: f32, alpha: u8 = 255) -> rl.Color {
 	return color
 }
 
+course_map_alpha :: proc(alpha: u8, traces_only: bool) -> u8 {
+	if traces_only do return u8(u16(alpha) / 2)
+	return alpha
+}
+
 course_map_point :: proc(
 	nodes: []Track_Node,
 	node_i: int,
@@ -179,6 +184,7 @@ draw_course_map :: proc(
 		)
 		alpha: u8 = 215
 		if node_i < current do alpha = 105
+		alpha = course_map_alpha(alpha, traces_only)
 		color := pace_color(nodes[node_i].pace, 0.72 + nodes[node_i].pace * 0.25, alpha)
 		rl.DrawLineEx(previous_point, point, 2.0, color)
 		rl.DrawLineEx(previous_plan, plan_point, 2.0, color)
@@ -196,9 +202,10 @@ draw_course_map :: proc(
 		bounds.min_height,
 		bounds.max_height,
 	)
-	rl.DrawCircleV(marker, 5.5, rl.Color{2, 5, 17, 255})
-	rl.DrawCircleLines(i32(marker.x), i32(marker.y), 6, rl.WHITE)
-	rl.DrawCircleV(marker, 2.2, pace_color(nodes[current].pace, 1))
+	marker_alpha := course_map_alpha(255, traces_only)
+	rl.DrawCircleV(marker, 5.5, rl.Color{2, 5, 17, marker_alpha})
+	rl.DrawCircleLines(i32(marker.x), i32(marker.y), 6, rl.Color{255, 255, 255, marker_alpha})
+	rl.DrawCircleV(marker, 2.2, pace_color(nodes[current].pace, 1, marker_alpha))
 	plan_marker := course_plan_point(
 		nodes,
 		current,
@@ -211,7 +218,12 @@ draw_course_map :: proc(
 		bounds.min_z,
 		bounds.max_z,
 	)
-	rl.DrawCircleV(plan_marker, 4.5, rl.Color{2, 5, 17, 255})
-	rl.DrawCircleLines(i32(plan_marker.x), i32(plan_marker.y), 5, rl.WHITE)
-	rl.DrawCircleV(plan_marker, 1.8, pace_color(nodes[current].pace, 1))
+	rl.DrawCircleV(plan_marker, 4.5, rl.Color{2, 5, 17, marker_alpha})
+	rl.DrawCircleLines(
+		i32(plan_marker.x),
+		i32(plan_marker.y),
+		5,
+		rl.Color{255, 255, 255, marker_alpha},
+	)
+	rl.DrawCircleV(plan_marker, 1.8, pace_color(nodes[current].pace, 1, marker_alpha))
 }
