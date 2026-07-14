@@ -98,7 +98,7 @@ lint: setup
 
 # Format project Odin files.
 fmt: setup
-    find "{{source}}" -type f -name '*.odin' -exec "{{odinfmt}}" -w {} +
+    "{{odinfmt}}" "{{source}}" -w
 
 
 # Run.
