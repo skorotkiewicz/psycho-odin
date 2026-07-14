@@ -282,7 +282,7 @@ main :: proc() {
 					score += 300
 					pulse = 1
 				} else if node.kind == BOOST && aligned {
-					overdrive = 6
+					overdrive = max(overdrive, 6)
 					score += 500
 					pulse, fx_tingle = 1, 1
 				}
