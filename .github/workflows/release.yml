@@ -57,6 +57,16 @@ jobs:
       - name: Check out source
         uses: actions/checkout@v4
 
+      - name: Verify game version
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! -s VERSION ]]; then
+            echo "::error file=VERSION::VERSION is missing or empty"
+            exit 1
+          fi
+          echo "Building PSYCHO $(tr -d '\r\n' < VERSION)"
+
       - name: Install Linux linker and X11 headers
         if: runner.os == 'Linux'
         shell: bash
