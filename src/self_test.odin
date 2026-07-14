@@ -388,6 +388,40 @@ self_test :: proc() {
 	assert(street_bulb_aura_alpha(1) == 240)
 	assert(street_bulb_radius(-1) == calm_bulb_radius)
 	assert(street_bulb_radius(2) == beat_bulb_radius)
+	silent_echo := ship_echo_response(0, 0.5)
+	threshold_echo := ship_echo_response(SHIP_ECHO_BEAT_THRESHOLD, 0.5)
+	medium_echo := ship_echo_response(0.58, 0.5)
+	strong_slow_echo := ship_echo_response(1, 0)
+	strong_fast_echo := ship_echo_response(1, 1)
+	clamped_echo := ship_echo_response(2, 2)
+	assert(silent_echo.strength == 0 && silent_echo.spread == 0 && silent_echo.depth == 0)
+	assert(threshold_echo.strength == 0, "small accents must not clutter the ship with echoes")
+	assert(
+		medium_echo.strength > 0 && medium_echo.strength < strong_fast_echo.strength,
+		"ship echoes must grow smoothly with a beat",
+	)
+	assert(strong_fast_echo.strength == 1)
+	assert(
+		strong_fast_echo.spread > strong_slow_echo.spread &&
+		strong_fast_echo.depth > strong_slow_echo.depth,
+		"fast tracks must tear the ship echoes farther apart",
+	)
+	assert(
+		strong_fast_echo.spread < 2 && strong_fast_echo.depth < 1.2,
+		"ship echoes must stay clear of the chase camera",
+	)
+	assert(clamped_echo == strong_fast_echo, "ship echo inputs must remain bounded")
+	rebound_echo_rhythm: Rhythm_Motion
+	rebound_echo_rhythm.push.rebound = 0.25
+	assert(
+		ship_echo_rhythm_strength(rebound_echo_rhythm) > 0.6,
+		"ship echoes must remain visible through the positive physical rebound",
+	)
+	rebound_echo_rhythm.push.rebound = -0.25
+	assert(
+		ship_echo_rhythm_strength(rebound_echo_rhythm) == 0,
+		"ship echoes must collapse after the rebound crosses rest",
+	)
 	silent_kick := rhythm_kick_response(0, 1, 0, 1)
 	impact_kick := rhythm_kick_response(1, 1, 0, 1)
 	rebound_kick := rhythm_kick_response(1, 1, 0.45, 1)

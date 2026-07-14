@@ -24,6 +24,35 @@ Rhythm_Motion :: struct {
 	push: Rhythm_Push,
 }
 
+SHIP_ECHO_BEAT_THRESHOLD :: f32(0.16)
+SHIP_ECHO_LAYERS :: 3
+
+Ship_Echo_Response :: struct {
+	strength, spread, depth: f32,
+}
+
+ship_echo_response :: proc(beat_strength, pace: f32) -> Ship_Echo_Response {
+	normalized := clamp(
+		(beat_strength - SHIP_ECHO_BEAT_THRESHOLD) / (1 - SHIP_ECHO_BEAT_THRESHOLD),
+		0,
+		1,
+	)
+	strength := normalized * normalized * (3 - 2 * normalized)
+	reach := f32(math.sqrt(f64(strength)))
+	clamped_pace := clamp(pace, 0, 1)
+	return {
+		strength = strength,
+		spread = reach * (0.75 + clamped_pace * 0.85),
+		depth = reach * (0.55 + clamped_pace * 0.45),
+	}
+}
+
+ship_echo_rhythm_strength :: proc(rhythm: Rhythm_Motion) -> f32 {
+	impact := max(rhythm.kick.impact, rhythm.push.impact)
+	rebound := max(rhythm.kick.rebound * 1.5, max(0, rhythm.push.rebound) * 2.6)
+	return clamp(max(impact, rebound), 0, 1)
+}
+
 rhythm_kick_response :: proc(accent, bass, fraction, visual_strength: f32) -> Rhythm_Kick {
 	phase := clamp(fraction, 0, 1)
 	strength := clamp(visual_strength, 0, 1)
@@ -70,6 +99,98 @@ rhythm_push_step :: proc(
 		next.rebound, next.velocity = 0, 0
 	}
 	return next
+}
+
+draw_ship_echo_edge :: proc(start, end: rl.Vector3, scale: f32, color: rl.Color) {
+	thickness := 0.020 * scale
+	rl.DrawCylinderEx(start, end, thickness, thickness, 4, color)
+}
+
+draw_ship_echo_ghost :: proc(
+	ship_x, ship_y, ship_z, base_pitch, base_bank, wing_tilt, scale: f32,
+	fill_color, wire_color: rl.Color,
+) {
+	wing_width := 1.48 * scale
+	nose := pitch_around({ship_x, ship_y, ship_z + 1.22 * scale}, ship_y, base_pitch)
+	center := pitch_around({ship_x, ship_y, ship_z + 0.02 * scale}, ship_y, base_pitch)
+	tail := pitch_around({ship_x, ship_y, ship_z - 0.46 * scale}, ship_y, base_pitch)
+	left := pitch_around(
+		{
+			ship_x - wing_width,
+			ship_y - 0.20 * scale + base_bank * wing_width + wing_tilt * scale,
+			ship_z - 0.34 * scale,
+		},
+		ship_y,
+		base_pitch,
+	)
+	right := pitch_around(
+		{
+			ship_x + wing_width,
+			ship_y - 0.20 * scale - base_bank * wing_width - wing_tilt * scale,
+			ship_z - 0.34 * scale,
+		},
+		ship_y,
+		base_pitch,
+	)
+
+	rl.DrawTriangle3D(nose, left, center, fill_color)
+	rl.DrawTriangle3D(nose, center, right, fill_color)
+	draw_ship_echo_edge(nose, left, scale, wire_color)
+	draw_ship_echo_edge(left, tail, scale, wire_color)
+	draw_ship_echo_edge(tail, right, scale, wire_color)
+	draw_ship_echo_edge(right, nose, scale, wire_color)
+	draw_ship_echo_edge(tail, nose, scale, wire_color)
+	cockpit := pitch_around(
+		{ship_x, ship_y + 0.24 * scale, ship_z + 0.30 * scale},
+		ship_y,
+		base_pitch,
+	)
+	rl.DrawSphere(cockpit, 0.30 * scale, fill_color)
+	rl.DrawSphereWires(cockpit, 0.34 * scale, 6, 6, wire_color)
+}
+
+draw_ship_echoes :: proc(
+	ship_x, ship_y, ship_z, base_pitch, base_bank, wing_tilt, pace, beat_strength: f32,
+) {
+	echo := ship_echo_response(beat_strength, pace)
+	if echo.strength <= 0 do return
+
+	rl.BeginBlendMode(.ADDITIVE)
+	defer rl.EndBlendMode()
+	visibility := f32(math.sqrt(f64(echo.strength)))
+	// Draw the oldest ghosts first so their transparent silhouettes layer cleanly.
+	for echo_index in 0 ..< SHIP_ECHO_LAYERS {
+		layer := SHIP_ECHO_LAYERS - echo_index
+		layer_f := f32(layer)
+		spread_scale := 0.65 + (layer_f - 1) * 0.35
+		depth_scale := 0.65 + (layer_f - 1) * 0.40
+		ghost_z := ship_z - layer_f * 0.18 - echo.depth * depth_scale
+		ghost_scale := 0.92 - (layer_f - 1) * 0.10
+		wire_alpha := u8(clamp(visibility * (190 - (layer_f - 1) * 24), 0, 255))
+		fill_alpha := u8(clamp(echo.strength * (70 - (layer_f - 1) * 10), 0, 255))
+
+		for side in -1 ..= 1 {
+			if side == 0 do continue
+			ghost_x := ship_x + f32(side) * echo.spread * spread_scale
+			fill_color := pace_color(pace, 1, fill_alpha)
+			wire_color := pace_color(pace, 1, wire_alpha)
+			if side > 0 {
+				fill_color = pace_opposite_color(pace, 1, fill_alpha)
+				wire_color = pace_opposite_color(pace, 1, wire_alpha)
+			}
+			draw_ship_echo_ghost(
+				ghost_x,
+				ship_y,
+				ghost_z,
+				base_pitch,
+				base_bank,
+				wing_tilt,
+				ghost_scale,
+				fill_color,
+				wire_color,
+			)
+		}
+	}
 }
 
 PSYCHO_SHADER :: `#version 330
@@ -182,6 +303,7 @@ draw_ride :: proc(
 	current: int,
 	fraction, player_lane, steer_lean, pulse, shake: f32,
 	rhythm: Rhythm_Motion,
+	overdrive: f32,
 ) {
 	next_i := min(current + 1, len(nodes) - 1)
 	base_x := nodes[current].curve_x + (nodes[next_i].curve_x - nodes[current].curve_x) * fraction
@@ -447,6 +569,7 @@ draw_ride :: proc(
 		max(0.48, pace + pulse * 0.18 + rhythm.kick.impact * 0.10 + rhythm.push.impact * 0.07),
 		1,
 	)
+	wing_tilt := steer_lean * 0.24
 	trail_count := 9 + int(pace_curve * 14)
 	trail_spacing := 0.52 + pace * 0.28 + rhythm.kick.impact * 0.22 + rhythm.push.impact * 0.42
 	for trail in 1 ..= trail_count {
@@ -463,7 +586,7 @@ draw_ride :: proc(
 		)
 		rl.DrawSphere(trail_point, 0.29 / f32(trail) + 0.05, trail_color)
 	}
-	wing_tilt := steer_lean * 0.24
+	if overdrive > 0 do draw_ship_echoes(ship_x, ship_y, ship_z, base_pitch, base_bank, wing_tilt, pace, ship_echo_rhythm_strength(rhythm))
 	body_back := pitch_around({ship_x, ship_y, ship_z - 0.45}, ship_y, base_pitch)
 	body_front := pitch_around({ship_x, ship_y, ship_z + 2.0}, ship_y, base_pitch)
 	rl.DrawCylinderEx(body_back, body_front, 0.56, 0.08, 8, pace_color(pace, 0.46))
