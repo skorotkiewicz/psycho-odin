@@ -1,4 +1,6 @@
-<h1 align="center">PSYCHO</h1>
+<h1 align="center">
+  <img src="assets/psycho-logo.svg" alt="PSYCHO — a neon ship splitting into music-reactive echo ghosts" width="900">
+</h1>
 
 <p align="center">
   <strong>Your music becomes a psychedelic roller coaster.</strong><br>
