@@ -123,7 +123,7 @@ test-asan: setup
 
 
 # Everything.
-all: fmt lint test build
+all: clean fmt lint test build
 
 
 # Odin environment.
