@@ -207,15 +207,28 @@ main :: proc() {
 		fraction := clamp(node_time - f32(current), 0, 1)
 		rhythm_impulse: f32
 		if current > last_index {
+			echo_rhythm := Rhythm_Motion {
+				push = rhythm_push,
+			}
+			echo_beat_strength := ship_echo_rhythm_strength(echo_rhythm)
 			for i in last_index + 1 ..= current {
 				node := nodes[i]
-				rhythm_impulse = max(
-					rhythm_impulse,
-					rhythm_impulse_strength(max(node.onset, node.beat), node.bass, visual_amount),
+				node_impulse := rhythm_impulse_strength(
+					max(node.onset, node.beat),
+					node.bass,
+					visual_amount,
 				)
-				aligned := abs(player_lane - f32(node.lane)) < 0.43
+				rhythm_impulse = max(rhythm_impulse, node_impulse)
+				echo_beat_strength = max(echo_beat_strength, rhythm_impulse)
+				aligned := lane_aligned(player_lane, node.lane)
 				if node.kind == PICKUP {
-					if aligned {
+					echo_aligned := ship_echo_collects_node(
+						node,
+						player_lane,
+						echo_beat_strength,
+						overdrive,
+					)
+					if aligned || echo_aligned {
 						streak += 1
 						if node.tone == last_tone do color_chain += 1
 						else do color_chain = 1

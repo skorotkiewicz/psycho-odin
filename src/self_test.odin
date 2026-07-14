@@ -349,6 +349,8 @@ self_test :: proc() {
 	fmt.printfln("self-test: camera loop-seam jump %.3f", seam_preview_jump)
 	assert(seam_preview_jump < 0.10, "camera preview must continue through the loop seam")
 	assert(abs(lane_position(4.8, 1) - 3.2) < 0.001)
+	assert(lane_aligned(0, 0))
+	assert(!lane_aligned(0, 1))
 	assert(steer_input(true, false) > 0, "A/left must move toward screen-left for a +Z camera")
 	assert(mouse_lane_target(0, 1000) > 0.99)
 	assert(abs(mouse_lane_target(500, 1000)) < 0.001)
@@ -411,6 +413,45 @@ self_test :: proc() {
 		"ship echoes must stay clear of the chase camera",
 	)
 	assert(clamped_echo == strong_fast_echo, "ship echo inputs must remain bounded")
+	near_echo_layer := ship_echo_layer(strong_fast_echo, 1)
+	far_echo_layer := ship_echo_layer(strong_fast_echo, SHIP_ECHO_LAYERS)
+	assert(
+		far_echo_layer.lateral_offset > near_echo_layer.lateral_offset &&
+		far_echo_layer.depth_offset < near_echo_layer.depth_offset &&
+		far_echo_layer.scale < near_echo_layer.scale,
+		"older ship echoes must be farther out, farther back, and smaller",
+	)
+	echo_pickup := Track_Node {
+		pace  = 1,
+		width = 4.8,
+		lane  = 1,
+		kind  = PICKUP,
+	}
+	assert(
+		ship_echo_collects_node(echo_pickup, 0, 1, 1),
+		"a strong overdrive echo must collect an adjacent-lane pickup",
+	)
+	echo_pickup.lane = -1
+	assert(
+		ship_echo_collects_node(echo_pickup, 0, 1, 1),
+		"echo pickup collection must be symmetric",
+	)
+	assert(
+		!ship_echo_collects_node(echo_pickup, 0, 0, 1),
+		"invisible echoes must not collect pickups",
+	)
+	assert(
+		!ship_echo_collects_node(echo_pickup, 0, 1, 0),
+		"echoes must not collect pickups outside overdrive",
+	)
+	non_pickup_kinds := [3]i32{HAZARD, SHIELD, BOOST}
+	for kind in non_pickup_kinds {
+		echo_pickup.kind = kind
+		assert(
+			!ship_echo_collects_node(echo_pickup, 0, 1, 1),
+			"echoes must never collect hazards, shields, or overdrive boxes",
+		)
+	}
 	rebound_echo_rhythm: Rhythm_Motion
 	rebound_echo_rhythm.push.rebound = 0.25
 	assert(

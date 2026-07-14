@@ -31,6 +31,10 @@ Ship_Echo_Response :: struct {
 	strength, spread, depth: f32,
 }
 
+Ship_Echo_Layer :: struct {
+	lateral_offset, depth_offset, scale: f32,
+}
+
 ship_echo_response :: proc(beat_strength, pace: f32) -> Ship_Echo_Response {
 	normalized := clamp(
 		(beat_strength - SHIP_ECHO_BEAT_THRESHOLD) / (1 - SHIP_ECHO_BEAT_THRESHOLD),
@@ -44,6 +48,17 @@ ship_echo_response :: proc(beat_strength, pace: f32) -> Ship_Echo_Response {
 		strength = strength,
 		spread = reach * (0.75 + clamped_pace * 0.85),
 		depth = reach * (0.55 + clamped_pace * 0.45),
+	}
+}
+
+ship_echo_layer :: proc(echo: Ship_Echo_Response, layer: int) -> Ship_Echo_Layer {
+	layer_f := f32(clamp(layer, 1, SHIP_ECHO_LAYERS))
+	spread_scale := 0.65 + (layer_f - 1) * 0.35
+	depth_scale := 0.65 + (layer_f - 1) * 0.40
+	return {
+		lateral_offset = echo.spread * spread_scale,
+		depth_offset = -layer_f * 0.18 - echo.depth * depth_scale,
+		scale = 0.92 - (layer_f - 1) * 0.10,
 	}
 }
 
@@ -162,16 +177,14 @@ draw_ship_echoes :: proc(
 	for echo_index in 0 ..< SHIP_ECHO_LAYERS {
 		layer := SHIP_ECHO_LAYERS - echo_index
 		layer_f := f32(layer)
-		spread_scale := 0.65 + (layer_f - 1) * 0.35
-		depth_scale := 0.65 + (layer_f - 1) * 0.40
-		ghost_z := ship_z - layer_f * 0.18 - echo.depth * depth_scale
-		ghost_scale := 0.92 - (layer_f - 1) * 0.10
+		geometry := ship_echo_layer(echo, layer)
+		ghost_z := ship_z + geometry.depth_offset
 		wire_alpha := u8(clamp(visibility * (190 - (layer_f - 1) * 24), 0, 255))
 		fill_alpha := u8(clamp(echo.strength * (70 - (layer_f - 1) * 10), 0, 255))
 
 		for side in -1 ..= 1 {
 			if side == 0 do continue
-			ghost_x := ship_x + f32(side) * echo.spread * spread_scale
+			ghost_x := ship_x + f32(side) * geometry.lateral_offset
 			fill_color := pace_color(pace, 1, fill_alpha)
 			wire_color := pace_color(pace, 1, wire_alpha)
 			if side > 0 {
@@ -185,7 +198,7 @@ draw_ship_echoes :: proc(
 				base_pitch,
 				base_bank,
 				wing_tilt,
-				ghost_scale,
+				geometry.scale,
 				fill_color,
 				wire_color,
 			)

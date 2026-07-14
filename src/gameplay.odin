@@ -2,6 +2,8 @@ package main
 
 import "core:math"
 
+LANE_COLLISION_TOLERANCE :: f32(0.43)
+
 steer_input :: proc(left, right: bool) -> f32 {
 	direction: f32
 	if left do direction += 1
@@ -99,4 +101,30 @@ resolve_hazard :: proc(
 
 lane_position :: proc(road_width, normalized_lane: f32) -> f32 {
 	return normalized_lane * road_width * 2 / 3
+}
+
+lane_aligned :: proc(player_lane: f32, object_lane: i32) -> bool {
+	return abs(player_lane - f32(object_lane)) < LANE_COLLISION_TOLERANCE
+}
+
+ship_echo_collects_node :: proc(
+	node: Track_Node,
+	player_lane, beat_strength, overdrive: f32,
+) -> bool {
+	if node.kind != PICKUP || overdrive <= 0 do return false
+	echo := ship_echo_response(beat_strength, node.pace)
+	if echo.strength <= 0 do return false
+
+	road_lane_span := lane_position(node.width, 1)
+	if road_lane_span <= 0 do return false
+	for layer in 1 ..= SHIP_ECHO_LAYERS {
+		geometry := ship_echo_layer(echo, layer)
+		normalized_offset := geometry.lateral_offset / road_lane_span
+		for side in -1 ..= 1 {
+			if side == 0 do continue
+			ghost_lane := player_lane + f32(side) * normalized_offset
+			if lane_aligned(ghost_lane, node.lane) do return true
+		}
+	}
+	return false
 }
