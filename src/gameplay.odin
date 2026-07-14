@@ -26,6 +26,10 @@ ride_finished :: proc(paused, playback_seen, music_playing: bool) -> bool {
 	return !paused && playback_seen && !music_playing
 }
 
+ride_controls_enabled :: proc(paused, finished: bool) -> bool {
+	return !paused && !finished
+}
+
 Hazard_Outcome :: struct {
 	shield, score, streak, color_chain, crashes: int,
 	last_tone:                                   i32,

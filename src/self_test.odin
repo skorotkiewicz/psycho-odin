@@ -364,6 +364,9 @@ self_test :: proc() {
 		ride_finished(false, true, false),
 		"stopped playback must finish even if the final sample was skipped",
 	)
+	assert(ride_controls_enabled(false, false), "steering must work during an active ride")
+	assert(!ride_controls_enabled(true, false), "steering must stop while paused")
+	assert(!ride_controls_enabled(false, true), "steering must stop after the ride finishes")
 	protected_hazard := resolve_hazard(2, 1500, 7, 3, 1, 4, 0.01)
 	assert(protected_hazard.blocked, "overdrive must block hazard damage")
 	assert(

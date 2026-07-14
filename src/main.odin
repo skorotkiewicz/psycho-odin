@@ -168,24 +168,33 @@ main :: proc() {
 			volume = min(0.8, volume + 0.05)
 			rl.SetMusicVolume(music, volume)
 		}
-		left_down := rl.IsKeyDown(.A) || rl.IsKeyDown(.LEFT)
-		right_down := rl.IsKeyDown(.D) || rl.IsKeyDown(.RIGHT)
-		move := steer_input(left_down, right_down)
-		lane_before_input := player_lane
-		mouse_delta := rl.GetMouseDelta()
-		if abs(mouse_delta.x) + abs(mouse_delta.y) > 0.15 || rl.IsMouseButtonPressed(.LEFT) {
-			mouse_active = true
-		}
-		if left_down || right_down {
+		if ride_controls_enabled(paused, finished) {
+			left_down := rl.IsKeyDown(.A) || rl.IsKeyDown(.LEFT)
+			right_down := rl.IsKeyDown(.D) || rl.IsKeyDown(.RIGHT)
+			move := steer_input(left_down, right_down)
+			lane_before_input := player_lane
+			mouse_delta := rl.GetMouseDelta()
+			if abs(mouse_delta.x) + abs(mouse_delta.y) > 0.15 || rl.IsMouseButtonPressed(.LEFT) {
+				mouse_active = true
+			}
+			if left_down || right_down {
+				mouse_active = false
+				player_lane = clamp(player_lane + move * dt * 2.2, -1, 1)
+			} else if mouse_active {
+				target_lane := mouse_lane_target(rl.GetMouseX(), rl.GetScreenWidth())
+				player_lane = smooth_mouse_lane(
+					player_lane,
+					target_lane,
+					dt,
+					config.mouse_response,
+				)
+			}
+			lane_speed := (player_lane - lane_before_input) / max(0.001, dt)
+			target_lean := clamp(lane_speed * 0.28, -1, 1)
+			steer_lean += (target_lean - steer_lean) * min(1, dt * 9)
+		} else {
 			mouse_active = false
-			player_lane = clamp(player_lane + move * dt * 2.2, -1, 1)
-		} else if mouse_active {
-			target_lane := mouse_lane_target(rl.GetMouseX(), rl.GetScreenWidth())
-			player_lane = smooth_mouse_lane(player_lane, target_lane, dt, config.mouse_response)
 		}
-		lane_speed := (player_lane - lane_before_input) / max(0.001, dt)
-		target_lean := clamp(lane_speed * 0.28, -1, 1)
-		steer_lean += (target_lean - steer_lean) * min(1, dt * 9)
 
 		time_played := rl.GetMusicTimePlayed(music)
 		node_time := time_played / STEP
