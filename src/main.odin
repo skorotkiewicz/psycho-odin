@@ -497,7 +497,10 @@ main :: proc() {
 			if audio_fx_channels < 2 {
 				fx_label = "BINAURAL FX: NEEDS STEREO"
 			} else if audio_fx_enabled {
-				fx_label = rl.TextFormat("BINAURAL FX: %.0f%% [B]", audio_fx_amount * 100)
+				fx_label = rl.TextFormat(
+					"BINAURAL FX: %.0f%% [B]",
+					audio_fx_amount / AUDIO_FX_MAX_AMOUNT * 100,
+				)
 			}
 			rl.DrawText(fx_label, 24, h - 58, 17, rl.Color{150, 190, 225, 255})
 			visual_label: cstring = "PSYCHO VISUAL: ON [P]"

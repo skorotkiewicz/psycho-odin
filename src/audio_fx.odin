@@ -118,6 +118,10 @@ audio_fx_delay_samples :: proc "contextless" (sample_rate: f32) -> int {
 	return clamp(int(sample_rate * AUDIO_FX_DELAY_SECONDS + 0.5), 1, AUDIO_FX_DELAY_CAPACITY - 1)
 }
 
+audio_fx_strength :: proc "contextless" (wet, amount: f32) -> f32 {
+	return clamp(wet, 0, 1) * clamp(amount / AUDIO_FX_MAX_AMOUNT, 0, 1)
+}
+
 audio_fx_process :: proc "contextless" (
 	samples: [^]f32,
 	frames, channel_count: int,
@@ -176,7 +180,7 @@ audio_fx_process :: proc "contextless" (
 		state.delay[state.delay_at] = {dry_l, dry_r}
 		state.delay_at = (state.delay_at + 1) % len(state.delay)
 
-		strength := state.wet * state.amount
+		strength := audio_fx_strength(state.wet, state.amount)
 		if strength <= 0 do continue
 
 		pan := f32(math.sin(state.pan_phase))
@@ -212,6 +216,10 @@ audio_fx :: proc "c" (buffer_data: rawptr, frames: u32) {
 }
 
 audio_fx_self_test :: proc() {
+	assert(
+		audio_fx_strength(1, AUDIO_FX_MAX_AMOUNT) == 1,
+		"maximum configured audio strength must produce a fully audible wet mix",
+	)
 	audio_fx_initialize(true, 0.31, 44100, 2)
 	control_snapshot := audio_fx_controls_snapshot()
 	assert(control_snapshot.enabled)
