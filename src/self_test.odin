@@ -542,7 +542,9 @@ audio_fx_strength = 0.33
 	dfar_s := rl.GetWorldToScreenEx(dfar, dcam, CAMERA_TEST_WIDTH, CAMERA_TEST_HEIGHT)
 	fmt.printfln(
 		"self-test: extreme dive near road y %.0f / %d, horizon y %.0f",
-		dnear_s.y, CAMERA_TEST_HEIGHT, dfar_s.y,
+		dnear_s.y,
+		CAMERA_TEST_HEIGHT,
+		dfar_s.y,
 	)
 	assert(
 		dnear_s.y > f32(CAMERA_TEST_HEIGHT) * 0.70,
