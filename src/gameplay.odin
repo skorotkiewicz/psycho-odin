@@ -30,6 +30,14 @@ ride_controls_enabled :: proc(paused, finished: bool) -> bool {
 	return !paused && !finished
 }
 
+Overlay_Visibility :: struct {
+	ride_hud, results: bool,
+}
+
+overlay_visibility :: proc(hide_ride_hud, finished: bool) -> Overlay_Visibility {
+	return {ride_hud = !hide_ride_hud, results = finished}
+}
+
 Hazard_Outcome :: struct {
 	shield, score, streak, color_chain, crashes: int,
 	last_tone:                                   i32,

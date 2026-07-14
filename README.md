@@ -84,6 +84,7 @@ The first run performs the deeper offline analysis. Generated maps are stored in
 | Pause / resume | `Space` |
 | Fullscreen | `F` |
 | Toggle FPS counter | `F2` |
+| Toggle all ride HUD | `F3` |
 | Toggle psychedelic post-process | `P` |
 | Visual strength | `,` / `.` |
 | Toggle experimental headphone FX | `B` |

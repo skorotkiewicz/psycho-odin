@@ -443,6 +443,13 @@ self_test :: proc() {
 	assert(ride_controls_enabled(false, false), "steering must work during an active ride")
 	assert(!ride_controls_enabled(true, false), "steering must stop while paused")
 	assert(!ride_controls_enabled(false, true), "steering must stop after the ride finishes")
+	hidden_ride_overlays := overlay_visibility(true, false)
+	assert(!hidden_ride_overlays.ride_hud && !hidden_ride_overlays.results)
+	hidden_finished_overlays := overlay_visibility(true, true)
+	assert(
+		!hidden_finished_overlays.ride_hud && hidden_finished_overlays.results,
+		"F3 must never hide the completed-ride results screen",
+	)
 	protected_hazard := resolve_hazard(2, 1500, 7, 3, 1, 4, 0.01)
 	assert(protected_hazard.blocked, "overdrive must block hazard damage")
 	assert(

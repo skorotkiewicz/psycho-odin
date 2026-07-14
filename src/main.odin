@@ -136,6 +136,7 @@ main :: proc() {
 	player_lane, steer_lean: f32
 	mouse_active := false
 	show_fps := false
+	hide_ride_hud := false
 	last_index := 0
 	score, streak, best_streak, color_chain, crashes: int
 	last_tone: i32
@@ -161,6 +162,7 @@ main :: proc() {
 		if rl.IsKeyPressed(.PERIOD) do visual_amount = min(1, visual_amount + 0.1)
 		if rl.IsKeyPressed(.F) do rl.ToggleFullscreen()
 		if rl.IsKeyPressed(.F2) do show_fps = !show_fps
+		if rl.IsKeyPressed(.F3) do hide_ride_hud = !hide_ride_hud
 		if rl.IsKeyPressed(.LEFT_BRACKET) do fx_amount = max(0, fx_amount - 0.05)
 		if rl.IsKeyPressed(.RIGHT_BRACKET) do fx_amount = min(0.5, fx_amount + 0.05)
 		if rl.IsKeyPressed(.MINUS) {
@@ -354,97 +356,100 @@ main :: proc() {
 		rl.DrawTexturePro(scene.texture, source, destination, {}, 0, rl.WHITE)
 		if visual_fx && rl.IsShaderValid(shader) do rl.EndShaderMode()
 
-		rl.DrawRectangle(22, 20, 470, 92, rl.Color{2, 4, 16, 205})
-		rl.DrawText("PSYCHO", 36, 30, 32, rl.Color{255, 80, 210, 255})
-		rl.DrawText(
-			rl.TextFormat("SCORE %08d   STREAK x%d   CHAIN x%d", score, streak, color_chain),
-			36,
-			72,
-			20,
-			rl.WHITE,
-		)
-		progress := f32(current) / f32(max(1, len(nodes) - 1))
-		rl.DrawRectangle(36, 98, 430, 4, rl.Color{30, 30, 55, 255})
-		rl.DrawRectangle(36, 98, i32(430 * progress), 4, rl.Color{50, 220, 255, 255})
-		map_width := i32(clamp(f32(w) * 0.35, 280, 440))
-		map_height := i32(clamp(f32(h) * 0.20, 140, 180))
-		draw_course_map(nodes, current, 24, 124, map_width, map_height, map_bounds)
-		for hull in 0 ..< 3 {
-			hull_color := rl.Color{45, 55, 80, 255}
-			if hull < shield do hull_color = rl.Color{70, 255, 145, 255}
-			rl.DrawRectangle(w - 150 + i32(hull * 34), 52, 26, 8, hull_color)
-		}
-		rl.DrawText(
-			rl.TextFormat("CRASHES %d", crashes),
-			w - 150,
-			70,
-			15,
-			rl.Color{180, 190, 215, 255},
-		)
-		if show_fps {
-			fps_label := rl.TextFormat("FPS %d", rl.GetFPS())
-			fps_width := rl.MeasureText(fps_label, 17)
-			fps_x := w - fps_width - 30
-			rl.DrawRectangle(fps_x - 8, 120, fps_width + 16, 25, rl.Color{2, 4, 16, 205})
-			rl.DrawText(fps_label, fps_x, 124, 17, rl.Color{80, 235, 255, 255})
-		}
-		section_names := [4]cstring{"CLIMB", "DROP", "SLALOM", "TUNNEL"}
-		rl.DrawText(
-			rl.TextFormat(
-				"%s  SPEED %.0f%%",
-				section_names[nodes[current].section],
-				track_speed_percent(pace_now, config.speed_limit),
-			),
-			w - 210,
-			96,
-			18,
-			pace_color(pace_now, 1),
-		)
-		if overdrive > 0 {
-			rl.DrawText("OVERDRIVE x2", w / 2 - 100, 28, 25, rl.Color{255, 220, 55, 255})
-			rl.DrawRectangle(
-				w / 2 - 100,
-				58,
-				i32(overdrive / 6 * 200),
-				5,
-				rl.Color{255, 100, 50, 255},
+		overlays := overlay_visibility(hide_ride_hud, finished)
+		if overlays.ride_hud {
+			rl.DrawRectangle(22, 20, 470, 92, rl.Color{2, 4, 16, 205})
+			rl.DrawText("PSYCHO", 36, 30, 32, rl.Color{255, 80, 210, 255})
+			rl.DrawText(
+				rl.TextFormat("SCORE %08d   STREAK x%d   CHAIN x%d", score, streak, color_chain),
+				36,
+				72,
+				20,
+				rl.WHITE,
+			)
+			progress := f32(current) / f32(max(1, len(nodes) - 1))
+			rl.DrawRectangle(36, 98, 430, 4, rl.Color{30, 30, 55, 255})
+			rl.DrawRectangle(36, 98, i32(430 * progress), 4, rl.Color{50, 220, 255, 255})
+			map_width := i32(clamp(f32(w) * 0.35, 280, 440))
+			map_height := i32(clamp(f32(h) * 0.20, 140, 180))
+			draw_course_map(nodes, current, 24, 124, map_width, map_height, map_bounds)
+			for hull in 0 ..< 3 {
+				hull_color := rl.Color{45, 55, 80, 255}
+				if hull < shield do hull_color = rl.Color{70, 255, 145, 255}
+				rl.DrawRectangle(w - 150 + i32(hull * 34), 52, 26, 8, hull_color)
+			}
+			rl.DrawText(
+				rl.TextFormat("CRASHES %d", crashes),
+				w - 150,
+				70,
+				15,
+				rl.Color{180, 190, 215, 255},
+			)
+			if show_fps {
+				fps_label := rl.TextFormat("FPS %d", rl.GetFPS())
+				fps_width := rl.MeasureText(fps_label, 17)
+				fps_x := w - fps_width - 30
+				rl.DrawRectangle(fps_x - 8, 120, fps_width + 16, 25, rl.Color{2, 4, 16, 205})
+				rl.DrawText(fps_label, fps_x, 124, 17, rl.Color{80, 235, 255, 255})
+			}
+			section_names := [4]cstring{"CLIMB", "DROP", "SLALOM", "TUNNEL"}
+			rl.DrawText(
+				rl.TextFormat(
+					"%s  SPEED %.0f%%",
+					section_names[nodes[current].section],
+					track_speed_percent(pace_now, config.speed_limit),
+				),
+				w - 210,
+				96,
+				18,
+				pace_color(pace_now, 1),
+			)
+			if overdrive > 0 {
+				rl.DrawText("OVERDRIVE x2", w / 2 - 100, 28, 25, rl.Color{255, 220, 55, 255})
+				rl.DrawRectangle(
+					w / 2 - 100,
+					58,
+					i32(overdrive / 6 * 200),
+					5,
+					rl.Color{255, 100, 50, 255},
+				)
+			}
+			fx_label: cstring = "EXPERIMENTAL FX: OFF [B]"
+			if fx_channels < 2 do fx_label = "EXPERIMENTAL FX: NEEDS STEREO"
+			if fx_on do fx_label = rl.TextFormat("EXPERIMENTAL FX: %.0f%% [B]", fx_amount * 100)
+			rl.DrawText(fx_label, 24, h - 58, 17, rl.Color{150, 190, 225, 255})
+			visual_label: cstring = "PSYCHO VISUAL: ON [P]"
+			if !visual_fx do visual_label = "PSYCHO VISUAL: OFF [P]"
+			rl.DrawText(visual_label, 24, h - 82, 17, rl.Color{190, 130, 245, 255})
+			rl.DrawText(
+				"A/D or MOUSE steer   SPACE pause   P visual   ,/. visual power   B audio FX   [/] audio power   -/+ volume",
+				24,
+				h - 32,
+				14,
+				rl.Color{130, 140, 170, 255},
+			)
+			rl.DrawText(
+				rl.TextFormat("VOL %.0f%%", volume * 100),
+				w - 105,
+				24,
+				17,
+				rl.Color{150, 190, 225, 255},
+			)
+			control_label: cstring = "KEYBOARD"
+			if mouse_active do control_label = "MOUSE"
+			rl.DrawText(
+				rl.TextFormat("STEER %s", control_label),
+				w - 120,
+				h - 58,
+				14,
+				rl.Color{115, 190, 220, 210},
 			)
 		}
-		fx_label: cstring = "EXPERIMENTAL FX: OFF [B]"
-		if fx_channels < 2 do fx_label = "EXPERIMENTAL FX: NEEDS STEREO"
-		if fx_on do fx_label = rl.TextFormat("EXPERIMENTAL FX: %.0f%% [B]", fx_amount * 100)
-		rl.DrawText(fx_label, 24, h - 58, 17, rl.Color{150, 190, 225, 255})
-		visual_label: cstring = "PSYCHO VISUAL: ON [P]"
-		if !visual_fx do visual_label = "PSYCHO VISUAL: OFF [P]"
-		rl.DrawText(visual_label, 24, h - 82, 17, rl.Color{190, 130, 245, 255})
-		rl.DrawText(
-			"A/D or MOUSE steer   SPACE pause   P visual   ,/. visual power   B audio FX   [/] audio power   -/+ volume",
-			24,
-			h - 32,
-			14,
-			rl.Color{130, 140, 170, 255},
-		)
-		rl.DrawText(
-			rl.TextFormat("VOL %.0f%%", volume * 100),
-			w - 105,
-			24,
-			17,
-			rl.Color{150, 190, 225, 255},
-		)
-		control_label: cstring = "KEYBOARD"
-		if mouse_active do control_label = "MOUSE"
-		rl.DrawText(
-			rl.TextFormat("STEER %s", control_label),
-			w - 120,
-			h - 58,
-			14,
-			rl.Color{115, 190, 220, 210},
-		)
 		if paused {
 			rl.DrawRectangle(0, 0, w, h, rl.Color{0, 0, 0, 130})
 			rl.DrawText("PAUSED", w / 2 - 88, h / 2 - 25, 42, rl.WHITE)
 		}
-		if finished {
+		if overlays.results {
 			rl.DrawRectangle(0, 0, w, h, rl.Color{0, 0, 0, 185})
 			panel_width := min(650, w - 40)
 			panel_height := min(330, h - 40)
