@@ -516,6 +516,41 @@ audio_fx_strength = 0.33
 	assert(fast_tempo > slow_tempo + 0.12)
 	assert(fast_pace > slow_pace + 0.05)
 
+	// Extreme dive: the camera must sit above the road so the road fills the
+	// lower screen and recedes to a low horizon, never a mid-screen line with
+	// background below it ("cut in half"). ponytail: regression guard for the
+	// dive camera-lift.
+	dive2 := make([]Track_Node, 200)
+	defer delete(dive2)
+	for i in 0 ..< len(dive2) {
+		dive2[i].curve_x = 0
+		dive2[i].curve_y = -f32(i) * 6.67
+		dive2[i].curve_z = f32(i) * 16.7
+		dive2[i].heading = 0
+		dive2[i].pitch = -0.38
+		dive2[i].width = 4.8
+		dive2[i].pace = 1
+	}
+	dcam := ride_camera(dive2, 50, 0, 0, 0, 0, 0)
+	dbase_x := dive2[50].curve_x
+	dbase_y := dive2[50].curve_y
+	dbase_z := dive2[50].curve_z
+	dbase_h := dive2[50].heading
+	dnear := road_center_sample(dive2, 50, dbase_x, dbase_y, dbase_z, dbase_h)
+	dfar := road_center_sample(dive2, 100, dbase_x, dbase_y, dbase_z, dbase_h)
+	dnear_s := rl.GetWorldToScreenEx(dnear, dcam, CAMERA_TEST_WIDTH, CAMERA_TEST_HEIGHT)
+	dfar_s := rl.GetWorldToScreenEx(dfar, dcam, CAMERA_TEST_WIDTH, CAMERA_TEST_HEIGHT)
+	fmt.printfln(
+		"self-test: extreme dive near road y %.0f / %d, horizon y %.0f",
+		dnear_s.y, CAMERA_TEST_HEIGHT, dfar_s.y,
+	)
+	assert(
+		dnear_s.y > f32(CAMERA_TEST_HEIGHT) * 0.70,
+		"extreme dives must drop the near road into the lower screen, not a mid-screen line",
+	)
+	assert(dnear_s.y > dfar_s.y, "the road must recede upward to a horizon on a dive")
+	assert(dfar_s.y < f32(CAMERA_TEST_HEIGHT) * 0.85, "the dive horizon must stay on screen")
+
 	path := ".psycho_cache/self-test.map"
 	assert(save_map(path, nodes))
 	loaded, ok := load_map(path)
