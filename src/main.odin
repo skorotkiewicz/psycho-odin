@@ -299,29 +299,20 @@ main :: proc() {
 		energy := nodes[current].bass * 0.6 + nodes[current].mid * 0.3 + nodes[current].high * 0.1
 		pace_now := nodes[current].pace
 		pace_curve := pace_now * pace_now * (3 - 2 * pace_now)
-		bg_top := pace_color(pace_now, 0.09 + pace_curve * 0.12)
-		bg_bottom := pace_color(max(0, pace_now - 0.22), 0.018 + pace_curve * 0.032)
 		rl.BeginTextureMode(scene)
 		rl.ClearBackground(rl.BLACK)
-		rl.DrawRectangleGradientV(
-			0,
-			0,
+		draw_music_background(
 			scene.texture.width,
 			scene.texture.height,
-			bg_top,
-			bg_bottom,
+			time_played,
+			nodes[current].bass,
+			nodes[current].mid,
+			nodes[current].high,
+			nodes[current].onset * (1 - fraction),
+			pace_now,
+			pulse,
+			visual_amount,
 		)
-		rl.BeginBlendMode(.ADDITIVE)
-		scene_center_x := scene.texture.width / 2
-		scene_center_y := scene.texture.height / 2
-		scene_radius := f32(min(scene.texture.width, scene.texture.height))
-		for ring in 0 ..< 5 {
-			radius :=
-				scene_radius * (0.12 + f32(ring) * 0.13) + pulse * 30 + pace_curve * f32(ring * 9)
-			ring_color := pace_color(pace_now, 0.42 + f32(ring) * 0.08, 45 + u8(ring * 8))
-			rl.DrawCircleLines(scene_center_x, scene_center_y, radius, ring_color)
-		}
-		rl.EndBlendMode()
 		draw_ride(nodes, current, fraction, player_lane, steer_lean, pulse, shake)
 		rl.EndTextureMode()
 

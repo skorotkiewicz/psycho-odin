@@ -23,6 +23,8 @@ of the entire ride.
 - **Music becomes motion.** Bass, mids, highs, transients, beat density, tempo,
   and song-relative energy influence the route, grade, speed, palette, camera,
   and traffic.
+- **The sky performs too.** Procedural neon ribbons, stars, rays, glow, and tunnel
+  rings react independently to bass, mids, highs, onsets, and musical pace.
 - **A real 3D course.** The road climbs, drops, banks, and turns through a cached
   centerline instead of sliding a straight strip beneath the player.
 - **One song, one lap.** The whole route is generated up front, shown on the HUD,

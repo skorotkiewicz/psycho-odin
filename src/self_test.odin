@@ -353,6 +353,17 @@ self_test :: proc() {
 	assert(mouse_lane_target(0, 1000) > 0.99)
 	assert(abs(mouse_lane_target(500, 1000)) < 0.001)
 	assert(mouse_lane_target(1000, 1000) < -0.99)
+	calm_background := background_response(0, 0, 0, 0, 0, 0)
+	bass_background := background_response(1, 0, 0, 0, 0, 0)
+	mid_background := background_response(0, 1, 0, 0, 0, 0)
+	high_background := background_response(0, 0, 1, 0, 0, 0)
+	beat_background := background_response(0, 0, 0, 1, 0, 0)
+	fast_background := background_response(0, 0, 0, 0, 1, 0)
+	assert(bass_background.bass_glow > calm_background.bass_glow)
+	assert(mid_background.ribbon_amplitude > calm_background.ribbon_amplitude)
+	assert(high_background.sparkle > calm_background.sparkle)
+	assert(beat_background.beat_flash > calm_background.beat_flash)
+	assert(fast_background.drift > calm_background.drift)
 	mouse_step := smooth_mouse_lane(0, 1, 1.0 / 60.0)
 	assert(
 		mouse_step > 0.32 && mouse_step < 1,
