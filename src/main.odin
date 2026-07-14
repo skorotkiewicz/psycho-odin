@@ -338,7 +338,17 @@ main :: proc() {
 			pulse,
 			visual_amount,
 		)
-		draw_ride(nodes, current, fraction, player_lane, steer_lean, pulse, shake, rhythm)
+		draw_ride(
+			nodes,
+			current,
+			fraction,
+			player_lane,
+			steer_lean,
+			pulse,
+			shake,
+			rhythm,
+			overdrive,
+		)
 		rl.EndTextureMode()
 
 		shader_time := f32(rl.GetTime())
