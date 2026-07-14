@@ -130,3 +130,25 @@ all: clean fmt lint test build
 info: setup
     {{odin}} version
     {{odin}} report
+
+add-tag:
+    #!/usr/bin/env bash
+    set -euo pipefail
+    VERSION=$(<VERSION)
+    if [[ ! "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z.-]+)?(\+[0-9A-Za-z.-]+)?$ ]]; then
+        echo "error: VERSION must contain a semantic version such as 1.2.3" >&2
+        exit 1
+    fi
+    git push origin main
+    git tag -a "v${VERSION}" -m "Release v${VERSION}"
+    git push origin "v${VERSION}"
+
+# `just remove-tag v0.0.0` or `just remove-tag` (uses fzf)
+remove-tag VERSION="":
+    #!/usr/bin/env bash
+    set -euo pipefail
+    tag="{{ VERSION }}"
+    [ -z "$tag" ] && tag=$(git tag | sort -V | fzf --prompt="Select tag to remove: ")
+    [ -z "$tag" ] && echo "No tag selected" && exit 1
+    git tag -d "$tag"
+    git push --delete origin "$tag"
