@@ -149,6 +149,7 @@ main :: proc() {
 	pulse, shake, overdrive: f32
 	rhythm_push: Rhythm_Push
 	secret_sequence: Secret_Sequence_State
+	ghost_pilot := false
 	for !rl.WindowShouldClose() {
 		rl.UpdateMusicStream(music)
 		dt := min(rl.GetFrameTime(), 0.05)
@@ -184,11 +185,16 @@ main :: proc() {
 			secret_step = secret_overdrive_sequence_step(secret_sequence, key, 0)
 			secret_sequence = secret_step.state
 			if secret_step.activated && !finished {
-				overdrive = SECRET_OVERDRIVE_SECONDS
-				pulse, fx_tingle = 1, 1
-				rhythm_push.impact = 1
-				rhythm_push.velocity = max(rhythm_push.velocity, 4.2)
-				fmt.println("PSYCHO: GHOSTS UNCHAINED")
+				ghost_pilot = !ghost_pilot
+				if ghost_pilot {
+					overdrive = max(overdrive, SECRET_OVERDRIVE_SECONDS)
+					pulse, fx_tingle = 1, 1
+					rhythm_push.impact = 1
+					rhythm_push.velocity = max(rhythm_push.velocity, 4.2)
+					fmt.println("PSYCHO: GHOST PILOT ENGAGED")
+				} else {
+					fmt.println("PSYCHO: GHOST PILOT DISENGAGED")
+				}
 			}
 		}
 		if ride_controls_enabled(paused, finished) {
@@ -197,10 +203,22 @@ main :: proc() {
 			move := steer_input(left_down, right_down)
 			lane_before_input := player_lane
 			mouse_delta := rl.GetMouseDelta()
-			if abs(mouse_delta.x) + abs(mouse_delta.y) > 0.15 || rl.IsMouseButtonPressed(.LEFT) {
+			mouse_input :=
+				abs(mouse_delta.x) + abs(mouse_delta.y) > 0.15 || rl.IsMouseButtonPressed(.LEFT)
+			if mouse_input {
 				mouse_active = true
 			}
-			if left_down || right_down {
+			manual_input := left_down || right_down || mouse_input
+			pilot_was_active := ghost_pilot
+			ghost_pilot = ghost_pilot_after_manual_input(ghost_pilot, manual_input)
+			if pilot_was_active && !ghost_pilot {
+				fmt.println("PSYCHO: GHOST PILOT DISENGAGED")
+			}
+			if ghost_pilot {
+				mouse_active = false
+				target_lane := ghost_pilot_target_lane(nodes, last_index, player_lane)
+				player_lane = smooth_mouse_lane(player_lane, target_lane, dt, GHOST_PILOT_RESPONSE)
+			} else if left_down || right_down {
 				mouse_active = false
 				player_lane = clamp(player_lane + move * dt * 2.2, -1, 1)
 			} else if mouse_active {
@@ -325,6 +343,7 @@ main :: proc() {
 			overdrive = 0
 			rhythm_push = {}
 			secret_sequence = {}
+			ghost_pilot = false
 			finished = false
 			results_saved, result_save_ok = false, false
 		}

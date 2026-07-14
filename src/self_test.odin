@@ -521,6 +521,46 @@ self_test :: proc() {
 	assert(ride_controls_enabled(false, false), "steering must work during an active ride")
 	assert(!ride_controls_enabled(true, false), "steering must stop while paused")
 	assert(!ride_controls_enabled(false, true), "steering must stop after the ride finishes")
+	pilot_nodes: [12]Track_Node
+	pilot_nodes[3] = {
+		kind = HAZARD,
+		lane = -1,
+	}
+	pilot_nodes[5] = {
+		kind = PICKUP,
+		lane = 1,
+	}
+	pilot_nodes[8] = {
+		kind = PICKUP,
+		lane = -1,
+	}
+	assert(
+		ghost_pilot_target_lane(pilot_nodes[:], 0, 0) == 1,
+		"ghost pilot must ignore hazards and target the nearest point pickup",
+	)
+	assert(
+		ghost_pilot_target_lane(pilot_nodes[:], 5, 0) == -1,
+		"ghost pilot must advance to the next pickup after passing its target",
+	)
+	pilot_nodes[8].kind = 0
+	assert(
+		ghost_pilot_target_lane(pilot_nodes[:], 5, 0.25) == 0.25,
+		"ghost pilot must hold its lane when no pickup is ahead",
+	)
+	assert(ghost_pilot_after_manual_input(true, false))
+	assert(
+		!ghost_pilot_after_manual_input(true, true),
+		"manual steering must disengage ghost pilot",
+	)
+	assert(!ghost_pilot_after_manual_input(false, false))
+	pilot_lane: f32 = -1
+	for _ in 0 ..< 18 {
+		pilot_lane = smooth_mouse_lane(pilot_lane, 1, 1.0 / 60.0, GHOST_PILOT_RESPONSE)
+	}
+	assert(
+		lane_aligned(pilot_lane, 1),
+		"ghost pilot must cross the road smoothly within one pickup interval",
+	)
 	secret_sequence: Secret_Sequence_State
 	secret_activations := 0
 	for key in SECRET_OVERDRIVE_SEQUENCE {
@@ -530,15 +570,15 @@ self_test :: proc() {
 	}
 	assert(
 		secret_activations == 1 && secret_sequence.matched == 0 && secret_sequence.remaining == 0,
-		"typing GHOSTS twice followed by F10 must activate the secret exactly once",
+		"typing the rotated GHOSTS ritual followed by F10 must activate exactly once",
 	)
-	secret_step := secret_overdrive_sequence_step({}, .G, 0)
+	secret_step := secret_overdrive_sequence_step({}, .S, 0)
 	secret_step = secret_overdrive_sequence_step(secret_step.state, .X, 0)
 	assert(
 		secret_step.state.matched == 0 && secret_step.state.remaining == 0,
 		"a wrong secret key must reset the ritual",
 	)
-	secret_step = secret_overdrive_sequence_step({}, .G, 0)
+	secret_step = secret_overdrive_sequence_step({}, .S, 0)
 	secret_step = secret_overdrive_sequence_step(
 		secret_step.state,
 		.KEY_NULL,

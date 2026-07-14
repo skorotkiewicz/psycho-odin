@@ -9,6 +9,9 @@ SECRET_OVERDRIVE_SECONDS :: f32(999)
 SECRET_SEQUENCE_TIMEOUT :: f32(5)
 SECRET_OVERDRIVE_SEQUENCE := [7]rl.KeyboardKey{.S, .T, .S, .G, .H, .O, .F10}
 
+GHOST_PILOT_LOOKAHEAD :: 24
+GHOST_PILOT_RESPONSE :: f32(8)
+
 Secret_Sequence_State :: struct {
 	matched:   int,
 	remaining: f32,
@@ -71,6 +74,21 @@ mouse_lane_target :: proc(mouse_x, screen_width: i32) -> f32 {
 smooth_mouse_lane :: proc(current, target, dt: f32, response_rate: f32 = 26) -> f32 {
 	response := 1 - f32(math.exp(f64(-response_rate * max(0, dt))))
 	return clamp(current + (target - current) * response, -1, 1)
+}
+
+ghost_pilot_target_lane :: proc(nodes: []Track_Node, current: int, current_lane: f32) -> f32 {
+	lane := clamp(current_lane, -1, 1)
+	if len(nodes) == 0 || current >= len(nodes) - 1 do return lane
+	start := max(0, current + 1)
+	end := min(len(nodes), start + GHOST_PILOT_LOOKAHEAD)
+	for i in start ..< end {
+		if nodes[i].kind == PICKUP do return clamp(f32(nodes[i].lane), -1, 1)
+	}
+	return lane
+}
+
+ghost_pilot_after_manual_input :: proc(active, manual_input: bool) -> bool {
+	return active && !manual_input
 }
 
 ride_finished :: proc(paused, playback_seen, music_playing: bool) -> bool {
