@@ -26,6 +26,42 @@ ride_finished :: proc(paused, playback_seen, music_playing: bool) -> bool {
 	return !paused && playback_seen && !music_playing
 }
 
+Hazard_Outcome :: struct {
+	shield, score, streak, color_chain, crashes: int,
+	last_tone:                                   i32,
+	blocked:                                     bool,
+}
+
+resolve_hazard :: proc(
+	shield, score, streak, color_chain: int,
+	last_tone: i32,
+	crashes: int,
+	overdrive: f32,
+) -> Hazard_Outcome {
+	result := Hazard_Outcome {
+		shield      = shield,
+		score       = score,
+		streak      = streak,
+		color_chain = color_chain,
+		last_tone   = last_tone,
+		crashes     = crashes,
+	}
+	if overdrive > 0 {
+		result.blocked = true
+		return result
+	}
+
+	result.shield -= 1
+	result.score = max(0, result.score - 350)
+	result.streak, result.color_chain, result.last_tone = 0, 0, -1
+	if result.shield <= 0 {
+		result.crashes += 1
+		result.shield = 3
+		result.score /= 2
+	}
+	return result
+}
+
 lane_position :: proc(road_width, normalized_lane: f32) -> f32 {
 	return normalized_lane * road_width * 2 / 3
 }

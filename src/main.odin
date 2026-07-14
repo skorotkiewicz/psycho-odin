@@ -213,15 +213,20 @@ main :: proc() {
 						last_tone = -1
 					}
 				} else if node.kind == HAZARD && aligned {
-					shield -= 1
-					score = max(0, score - 350)
-					streak, color_chain, last_tone = 0, 0, -1
-					shake, pulse = 1, 1
-					if shield <= 0 {
-						crashes += 1
-						shield = 3
-						score /= 2
-					}
+					outcome := resolve_hazard(
+						shield,
+						score,
+						streak,
+						color_chain,
+						last_tone,
+						crashes,
+						overdrive,
+					)
+					shield, score, streak = outcome.shield, outcome.score, outcome.streak
+					color_chain, last_tone, crashes =
+						outcome.color_chain, outcome.last_tone, outcome.crashes
+					if outcome.blocked do pulse, fx_tingle = 1, 1
+					else do shake, pulse = 1, 1
 				} else if node.kind == SHIELD && aligned {
 					shield = min(3, shield + 1)
 					score += 300

@@ -364,6 +364,35 @@ self_test :: proc() {
 		ride_finished(false, true, false),
 		"stopped playback must finish even if the final sample was skipped",
 	)
+	protected_hazard := resolve_hazard(2, 1500, 7, 3, 1, 4, 0.01)
+	assert(protected_hazard.blocked, "overdrive must block hazard damage")
+	assert(
+		protected_hazard.shield == 2 &&
+		protected_hazard.score == 1500 &&
+		protected_hazard.streak == 7 &&
+		protected_hazard.color_chain == 3 &&
+		protected_hazard.last_tone == 1 &&
+		protected_hazard.crashes == 4,
+		"blocked hazards must preserve all player progress",
+	)
+	damaging_hazard := resolve_hazard(2, 1500, 7, 3, 1, 4, 0)
+	assert(!damaging_hazard.blocked)
+	assert(
+		damaging_hazard.shield == 1 &&
+		damaging_hazard.score == 1150 &&
+		damaging_hazard.streak == 0 &&
+		damaging_hazard.color_chain == 0 &&
+		damaging_hazard.last_tone == -1 &&
+		damaging_hazard.crashes == 4,
+		"hazards must retain their normal damage outside overdrive",
+	)
+	crashing_hazard := resolve_hazard(1, 1000, 7, 3, 1, 4, 0)
+	assert(
+		crashing_hazard.shield == 3 &&
+		crashing_hazard.score == 325 &&
+		crashing_hazard.crashes == 5,
+		"an unprotected final shield hit must still cause a crash",
+	)
 	config_test := parse_game_config(
 		`
 mouse_response = 31.0
