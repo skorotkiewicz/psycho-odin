@@ -1,0 +1,234 @@
+name: Release PSYCHO
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+env:
+  ODIN_VERSION: dev-2026-07a
+
+jobs:
+  build:
+    name: ${{ matrix.name }}
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x86_64
+            runner: ubuntu-24.04
+            odin_platform: linux-amd64
+            odin_target: linux_amd64
+            odin_sha256: 32a7678abc66f1af7353abb5b0b5da47d94b7e663f6d250df29bc9117e864c10
+            artifact: psycho-linux-x86_64
+            extension: tar.gz
+          - name: Linux ARM64
+            runner: ubuntu-24.04-arm
+            odin_platform: linux-arm64
+            odin_target: linux_arm64
+            odin_sha256: 5a1bf73c1b2bf8ed1838110f1cc5938049f3c5df733f725c53cbd532d8c6eaa6
+            artifact: psycho-linux-arm64
+            extension: tar.gz
+          - name: macOS x86_64
+            runner: macos-15-intel
+            odin_platform: macos-amd64
+            odin_target: darwin_amd64
+            odin_sha256: 44e7e1e01a04d03584baca3aef4029efd579fbbe5f28ba5ae1106dd51a74e633
+            artifact: psycho-macos-x86_64
+            extension: tar.gz
+          - name: macOS ARM64
+            runner: macos-15
+            odin_platform: macos-arm64
+            odin_target: darwin_arm64
+            odin_sha256: 40e9f5970bdce1938769a792ebda7ac39d3d10bfe703a721ac5b578bc8dd3458
+            artifact: psycho-macos-arm64
+            extension: tar.gz
+          - name: Windows x86_64
+            runner: windows-2025
+            odin_platform: windows-amd64
+            odin_target: windows_amd64
+            odin_sha256: cfe09f1c086b29d12158f14d6772a775ecc2b842119f8ff5a78e62a5cb656cf8
+            artifact: psycho-windows-x86_64
+            extension: zip
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Install Linux linker and X11 headers
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes clang libx11-dev
+
+      - name: Install Odin (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        env:
+          ODIN_PLATFORM: ${{ matrix.odin_platform }}
+          ODIN_SHA256: ${{ matrix.odin_sha256 }}
+        run: |
+          set -euo pipefail
+          archive="$RUNNER_TEMP/odin.tar.gz"
+          root="$RUNNER_TEMP/odin"
+          url="https://github.com/odin-lang/Odin/releases/download/$ODIN_VERSION/odin-$ODIN_PLATFORM-$ODIN_VERSION.tar.gz"
+
+          curl --fail --location --retry 3 --output "$archive" "$url"
+          actual="$(openssl dgst -sha256 "$archive" | awk '{print $NF}')"
+          if [[ "$actual" != "$ODIN_SHA256" ]]; then
+            echo "Odin archive checksum mismatch: expected $ODIN_SHA256, got $actual" >&2
+            exit 1
+          fi
+
+          mkdir -p "$root"
+          tar -xzf "$archive" --strip-components=1 -C "$root"
+          chmod +x "$root/odin"
+          echo "$root" >> "$GITHUB_PATH"
+          echo "ODIN_ROOT=$root" >> "$GITHUB_ENV"
+
+      - name: Install Odin (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          ODIN_PLATFORM: ${{ matrix.odin_platform }}
+          ODIN_SHA256: ${{ matrix.odin_sha256 }}
+        run: |
+          $archive = Join-Path $env:RUNNER_TEMP 'odin.zip'
+          $unpacked = Join-Path $env:RUNNER_TEMP 'odin-unpacked'
+          $url = "https://github.com/odin-lang/Odin/releases/download/$env:ODIN_VERSION/odin-$env:ODIN_PLATFORM-$env:ODIN_VERSION.zip"
+
+          Invoke-WebRequest -Uri $url -OutFile $archive
+          $actual = (Get-FileHash -Algorithm SHA256 $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $env:ODIN_SHA256) {
+            throw "Odin archive checksum mismatch: expected $env:ODIN_SHA256, got $actual"
+          }
+
+          Expand-Archive -Path $archive -DestinationPath $unpacked -Force
+          $odin = Get-ChildItem -Path $unpacked -Filter odin.exe -Recurse | Select-Object -First 1
+          if (-not $odin) {
+            throw 'odin.exe was not found in the official archive'
+          }
+          $root = $odin.Directory.FullName
+          Add-Content -Path $env:GITHUB_PATH -Value $root
+          Add-Content -Path $env:GITHUB_ENV -Value "ODIN_ROOT=$root"
+
+      - name: Configure MSVC
+        if: runner.os == 'Windows'
+        uses: ilammy/msvc-dev-cmd@v1
+        with:
+          arch: x64
+
+      - name: Fix pinned Odin Raylib ARM64 archive path
+        if: matrix.odin_target == 'linux_arm64'
+        shell: bash
+        run: |
+          bindings="$ODIN_ROOT/vendor/raylib/raylib.odin"
+          grep -q 'linux-arm/libraylib.a' "$bindings"
+          sed -i 's#linux-arm/libraylib.a#linux-arm64/libraylib.a#' "$bindings"
+          grep -q 'linux-arm64/libraylib.a' "$bindings"
+
+      - name: Verify Odin toolchain
+        run: odin version
+
+      - name: Build and self-test (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          odin build src \
+            -target:${{ matrix.odin_target }} \
+            -out:psycho \
+            -o:size \
+            -vet \
+            -vet-tabs \
+            -vet-style \
+            -strict-style \
+            -warnings-as-errors
+          ./psycho --self-test
+
+      - name: Build and self-test (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          odin build src `
+            -target:${{ matrix.odin_target }} `
+            -out:psycho.exe `
+            -o:size `
+            -vet `
+            -vet-tabs `
+            -vet-style `
+            -strict-style `
+            -warnings-as-errors
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+          .\psycho.exe --self-test
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Package (Unix)
+        if: runner.os != 'Windows'
+        shell: bash
+        run: |
+          set -euo pipefail
+          package="dist/${{ matrix.artifact }}"
+          mkdir -p "$package"
+          cp psycho config.toml README.md MORE.md LICENSE "$package/"
+          cp -R assets "$package/assets"
+          tar -C dist -czf "dist/${{ matrix.artifact }}.tar.gz" "${{ matrix.artifact }}"
+          tar -tzf "dist/${{ matrix.artifact }}.tar.gz"
+
+      - name: Package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $package = 'dist\${{ matrix.artifact }}'
+          New-Item -ItemType Directory -Path $package -Force | Out-Null
+          Copy-Item psycho.exe, config.toml, README.md, MORE.md, LICENSE -Destination $package
+          Copy-Item assets -Destination "$package\assets" -Recurse
+          Compress-Archive -Path $package -DestinationPath 'dist\${{ matrix.artifact }}.zip' -CompressionLevel Optimal
+          if (-not (Test-Path 'dist\${{ matrix.artifact }}.zip')) {
+            throw 'Windows release archive was not created'
+          }
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: dist/${{ matrix.artifact }}.${{ matrix.extension }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Publish GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+
+    steps:
+      - name: Download packages
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          pattern: psycho-*
+          merge-multiple: true
+
+      - name: Generate package checksums
+        shell: bash
+        run: |
+          cd artifacts
+          sha256sum psycho-* > SHA256SUMS
+          cat SHA256SUMS
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: PSYCHO ${{ github.ref_name }}
+          files: |
+            artifacts/psycho-*.tar.gz
+            artifacts/psycho-*.zip
+            artifacts/SHA256SUMS
+          fail_on_unmatched_files: true
+          generate_release_notes: true
