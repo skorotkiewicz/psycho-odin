@@ -30,9 +30,11 @@ odin build src -out:psycho
 Raylib also accepts MP3, OGG, and FLAC. Cached maps live in `.psycho_cache/`;
 changing the audio or analyzer version creates a new map automatically.
 
-Collect same-color traffic to grow the chain multiplier, dodge red hazards,
-and collect green shields. Three hull hits cause a crash and halve the score,
-but the ride continues. Gold cubes trigger six seconds of double-score
+Collect same-color traffic to grow the chain multiplier. Collect every pickup
+in a movement to earn a bonus proportional to that section's length, and hold
+the outer lane through banked turns to trickle in drift points. Dodge red
+hazards and collect green shields. Three hull hits cause a crash and halve the
+score, but the ride continues. Gold cubes trigger six seconds of double-score
 overdrive and stronger visual effects.
 
 Controls: move the mouse horizontally, or use `A/D` or arrows, to steer. The

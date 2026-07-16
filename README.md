@@ -38,9 +38,10 @@ of the entire ride.
   centerline instead of sliding a straight strip beneath the player.
 - **One song, one lap.** The whole route is generated up front, shown on the HUD,
   and smoothly closed back onto its starting position and tangent.
-- **Arcade scoring.** Collect matching colors to grow a chain multiplier, dodge
-  hazards, repair shields, and catch gold boosts for six seconds of double-score
-  overdrive.
+- **Arcade scoring.** Collect matching colors to grow a chain multiplier, clear
+  every pickup in a movement for a perfect-section bonus, hold the outer lane
+  through banked turns for drift points, dodge hazards, repair shields, and catch
+  gold boosts for six seconds of double-score overdrive.
 - **Keyboard or mouse.** Switch naturally between horizontal mouse steering,
   `A`/`D`, and the arrow keys. The cursor disappears during the ride.
 - **Persistent results and personal bests.** Every completed run gets a result
@@ -174,7 +175,8 @@ just build       # optimized release build
 
 The deterministic self-test exercises the binaural DSP dry path, ramps and
 headroom alongside audio analysis, tempo response, climbs and drops, left/right
-curvature, loop closure, camera continuity, and near-camera road safety.
+curvature, loop closure, camera continuity, near-camera road safety, perfect
+sections, and frame-rate-independent drift scoring.
 
 ## Inspiration and comfort
 
