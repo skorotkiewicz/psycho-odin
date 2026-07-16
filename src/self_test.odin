@@ -86,8 +86,7 @@ test_track_and_geometry :: proc() {
 	spiral_heading, reverse_spiral_heading: f32
 	for _ in 0 ..< TRACK_SECTION_LENGTH {
 		target := spiral_heading_target(spiral_heading, 1)
-		spiral_heading =
-			spiral_heading * (1 - TRACK_HEADING_BLEND) + target * TRACK_HEADING_BLEND
+		spiral_heading = spiral_heading * (1 - TRACK_HEADING_BLEND) + target * TRACK_HEADING_BLEND
 		reverse_target := spiral_heading_target(reverse_spiral_heading, -1)
 		reverse_spiral_heading =
 			reverse_spiral_heading * (1 - TRACK_HEADING_BLEND) +
@@ -97,7 +96,7 @@ test_track_and_geometry :: proc() {
 	assert(abs(reverse_spiral_heading + f32(2 * math.PI)) < 0.001)
 	assert(spiral_pitch_base(0) > 0 && spiral_pitch_base(0.75) > 0)
 
-	spiral_nodes := make([]Track_Node, TRACK_SECTION_LENGTH * 2)
+	spiral_nodes := make([]Track_Node, TRACK_SECTION_LENGTH * 6)
 	defer delete(spiral_nodes)
 	for &node in spiral_nodes {
 		node.bass = 0.1
@@ -113,7 +112,10 @@ test_track_and_geometry :: proc() {
 	assert(track_is_closed(spiral_nodes))
 	spiral_cached_turn: f32
 	for i in 0 ..< TRACK_SECTION_LENGTH - 1 {
-		spiral_cached_turn += wrapped_angle_delta(spiral_nodes[i + 1].heading, spiral_nodes[i].heading)
+		spiral_cached_turn += wrapped_angle_delta(
+			spiral_nodes[i + 1].heading,
+			spiral_nodes[i].heading,
+		)
 	}
 	fmt.printfln("self-test: spiral cached turn %.1f°", f64(spiral_cached_turn) * 180 / math.PI)
 	spiral_camera_y, spiral_camera_samples := fast_camera_min_y(spiral_nodes)

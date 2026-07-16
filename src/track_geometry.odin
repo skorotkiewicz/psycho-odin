@@ -60,6 +60,34 @@ close_track_loop :: proc(nodes: []Track_Node) {
 			loop_height + music_height,
 			radius * f32(math.sin(f64(theta))),
 		}
+		if nodes[i].section == SPIRAL {
+			// The normal loop wrapper deliberately discards the draft track's forward
+			// coordinate. Preserve a spiral's local X/Z loop in the radial/tangent
+			// plane so its full revolution survives into the cached centerline.
+			section_start := (i / TRACK_SECTION_LENGTH) * TRACK_SECTION_LENGTH
+			section_end := min(last_i, section_start + TRACK_SECTION_LENGTH - 1)
+			section_span := max(1, section_end - section_start)
+			section_phase := f32(i - section_start) / f32(section_span)
+			start_node := nodes[section_start]
+			end_node := nodes[section_end]
+			baseline_x := start_node.curve_x + (end_node.curve_x - start_node.curve_x) * section_phase
+			baseline_z := start_node.curve_z + (end_node.curve_z - start_node.curve_z) * section_phase
+			draft_x := nodes[i].curve_x - baseline_x
+			draft_z := nodes[i].curve_z - baseline_z
+			start_cos := f32(math.cos(f64(start_node.heading)))
+			start_sin := f32(math.sin(f64(start_node.heading)))
+			local_lateral := draft_x * start_cos - draft_z * start_sin
+			local_forward := draft_x * start_sin + draft_z * start_cos
+			max_offset := loop_radius * 0.38
+			local_lateral = clamp(local_lateral, -max_offset, max_offset)
+			local_forward = clamp(local_forward, -max_offset, max_offset)
+			radial_x := -f32(math.cos(f64(theta)))
+			radial_z := f32(math.sin(f64(theta)))
+			tangent_x := f32(math.sin(f64(theta)))
+			tangent_z := f32(math.cos(f64(theta)))
+			wrapped[i].x += local_lateral * radial_x + local_forward * tangent_x
+			wrapped[i].z += local_lateral * radial_z + local_forward * tangent_z
+		}
 	}
 	// Avoid a tiny floating-point crack from sin/cos(2*pi).
 	wrapped[last_i] = wrapped[0]
