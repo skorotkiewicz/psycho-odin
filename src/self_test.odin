@@ -626,6 +626,74 @@ test_gameplay_and_rendering :: proc() {
 		hidden_finished_overlays.results,
 		"F3 must never hide the completed-ride results screen",
 	)
+	mastery_nodes: [TRACK_SECTION_LENGTH + 16]Track_Node
+	mastery_nodes[5].kind = PICKUP
+	mastery_nodes[31].kind = PICKUP
+	mastery_nodes[TRACK_SECTION_LENGTH + 4].kind = PICKUP
+	perfect_section := begin_section_mastery(mastery_nodes[:], 0)
+	assert(
+		perfect_section.active &&
+		perfect_section.section_index == 0 &&
+		perfect_section.node_count == TRACK_SECTION_LENGTH &&
+		perfect_section.pickup_count == 2,
+	)
+	perfect_section = record_section_pickup(perfect_section, true)
+	perfect_section = record_section_pickup(perfect_section, true)
+	perfect_outcome := finish_section_mastery(perfect_section)
+	assert(perfect_outcome.perfect)
+	assert(
+		perfect_outcome.bonus == TRACK_SECTION_LENGTH * SECTION_CLEAR_POINTS_PER_NODE,
+		"a perfect full section must award a length-scaled bonus",
+	)
+	assert(!perfect_outcome.state.active, "a finished section must not award twice")
+	assert(finish_section_mastery(perfect_outcome.state).bonus == 0)
+	missed_section := begin_section_mastery(mastery_nodes[:], 0)
+	missed_section = record_section_pickup(missed_section, true)
+	missed_section = record_section_pickup(missed_section, false)
+	assert(
+		!finish_section_mastery(missed_section).perfect,
+		"missing any pickup must invalidate the section bonus",
+	)
+	short_section := begin_section_mastery(mastery_nodes[:], TRACK_SECTION_LENGTH)
+	assert(short_section.node_count == 16 && short_section.pickup_count == 1)
+	short_section = record_section_pickup(short_section, true)
+	assert(
+		finish_section_mastery(short_section).bonus == 16 * SECTION_CLEAR_POINTS_PER_NODE,
+		"the final partial section must scale its bonus by its actual length",
+	)
+	no_pickup_nodes: [12]Track_Node
+	assert(
+		finish_section_mastery(begin_section_mastery(no_pickup_nodes[:], 0)).bonus == 0,
+		"empty sections must not award a vacuous perfect bonus",
+	)
+	assert(section_index_for_node(TRACK_SECTION_LENGTH - 1) == 0)
+	assert(section_index_for_node(TRACK_SECTION_LENGTH) == 1)
+	assert(drift_score_rate(0.68, -1) == DRIFT_MAX_POINTS_PER_SECOND)
+	assert(drift_score_rate(-0.68, 1) == DRIFT_MAX_POINTS_PER_SECOND)
+	assert(
+		drift_score_rate(0.68, 1) == 0 && drift_score_rate(-0.68, -1) == 0,
+		"the inner lane must never earn drift points",
+	)
+	assert(drift_score_rate(DRIFT_MIN_BANK, -1) == 0)
+	assert(drift_score_rate(0.68, -DRIFT_MIN_OUTER_LANE) == 0)
+	frame_steps := [2]int{20, 60}
+	frame_rates := [2]f32{20, 60}
+	drift_totals: [2]int
+	for fixture_i in 0 ..< len(frame_steps) {
+		residual: f32
+		for _ in 0 ..< frame_steps[fixture_i] {
+			step := drift_score_step(residual, 0.68, -1, 1 / frame_rates[fixture_i])
+			residual = step.residual
+			drift_totals[fixture_i] += step.points
+		}
+	}
+	assert(
+		drift_totals[0] == drift_totals[1] &&
+		drift_totals[0] == int(DRIFT_MAX_POINTS_PER_SECOND),
+		"drift scoring must be independent of frame rate",
+	)
+	paused_drift := drift_score_step(0.4, 0.68, -1, 0)
+	assert(paused_drift.points == 0 && paused_drift.residual == 0.4)
 	protected_hazard := resolve_hazard(2, 1500, 7, 3, 1, 4, 0.01)
 	assert(protected_hazard.blocked, "overdrive must block hazard damage")
 	assert(

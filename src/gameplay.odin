@@ -5,6 +5,11 @@ import rl "vendor:raylib"
 
 LANE_COLLISION_TOLERANCE :: f32(0.43)
 
+SECTION_CLEAR_POINTS_PER_NODE :: 10
+DRIFT_MIN_BANK :: f32(0.14)
+DRIFT_MIN_OUTER_LANE :: f32(0.55)
+DRIFT_MAX_POINTS_PER_SECOND :: f32(90)
+
 SECRET_OVERDRIVE_SECONDS :: f32(999)
 SECRET_SEQUENCE_TIMEOUT :: f32(5)
 SECRET_OVERDRIVE_SEQUENCE := [7]rl.KeyboardKey{.S, .T, .S, .G, .H, .O, .F10}
@@ -128,6 +133,109 @@ overlay_visibility :: proc(hud_mode: Hud_Mode, finished: bool) -> Overlay_Visibi
 	visibility.ride_hud = hud_mode == .FULL
 	visibility.map_only = hud_mode == .MAP_ONLY
 	return visibility
+}
+
+Section_Mastery_State :: struct {
+	section_index:                    int,
+	node_count, pickup_count:         int,
+	pickups_seen, pickups_collected:  int,
+	missed, active:                   bool,
+}
+
+Section_Mastery_Outcome :: struct {
+	state:   Section_Mastery_State,
+	bonus:   int,
+	perfect: bool,
+}
+
+section_index_for_node :: proc(node_index: int) -> int {
+	return max(0, node_index) / TRACK_SECTION_LENGTH
+}
+
+begin_section_mastery :: proc(nodes: []Track_Node, node_index: int) -> Section_Mastery_State {
+	if len(nodes) == 0 || node_index < 0 || node_index >= len(nodes) do return {}
+	section_index := section_index_for_node(node_index)
+	start := section_index * TRACK_SECTION_LENGTH
+	end := min(len(nodes), start + TRACK_SECTION_LENGTH)
+	state := Section_Mastery_State {
+		section_index = section_index,
+		node_count = end - start,
+		active = true,
+	}
+	for i in start ..< end {
+		if nodes[i].kind == PICKUP do state.pickup_count += 1
+	}
+	return state
+}
+
+record_section_pickup :: proc(
+	state: Section_Mastery_State,
+	collected: bool,
+) -> Section_Mastery_State {
+	result := state
+	if !result.active do return result
+	result.pickups_seen = min(result.pickup_count, result.pickups_seen + 1)
+	if collected {
+		result.pickups_collected = min(result.pickup_count, result.pickups_collected + 1)
+	} else {
+		result.missed = true
+	}
+	return result
+}
+
+finish_section_mastery :: proc(state: Section_Mastery_State) -> Section_Mastery_Outcome {
+	result := Section_Mastery_Outcome {
+		state = state,
+	}
+	result.state.active = false
+	result.perfect =
+		state.active &&
+		state.pickup_count > 0 &&
+		state.pickups_seen == state.pickup_count &&
+		state.pickups_collected == state.pickup_count &&
+		!state.missed
+	if result.perfect do result.bonus = state.node_count * SECTION_CLEAR_POINTS_PER_NODE
+	return result
+}
+
+Drift_Score_Step :: struct {
+	residual, rate: f32,
+	points:         int,
+}
+
+drift_score_rate :: proc(bank, player_lane: f32) -> f32 {
+	bank_magnitude := abs(bank)
+	if bank_magnitude <= DRIFT_MIN_BANK do return 0
+	turn_direction: f32 = 1
+	if bank < 0 do turn_direction = -1
+	// The outside lane is opposite the direction of the curve.
+	outer_lane := -clamp(player_lane, -1, 1) * turn_direction
+	if outer_lane <= DRIFT_MIN_OUTER_LANE do return 0
+	bank_strength := clamp(
+		(bank_magnitude - DRIFT_MIN_BANK) / (0.68 - DRIFT_MIN_BANK),
+		0,
+		1,
+	)
+	lane_strength := clamp(
+		(outer_lane - DRIFT_MIN_OUTER_LANE) / (1 - DRIFT_MIN_OUTER_LANE),
+		0,
+		1,
+	)
+	return DRIFT_MAX_POINTS_PER_SECOND * bank_strength * lane_strength
+}
+
+drift_score_step :: proc(
+	residual, bank, player_lane, delta_time: f32,
+) -> Drift_Score_Step {
+	result := Drift_Score_Step {
+		residual = clamp(residual, 0, 0.999999),
+		rate = drift_score_rate(bank, player_lane),
+	}
+	if result.rate <= 0 || delta_time <= 0 do return result
+	total := result.residual + result.rate * delta_time
+	result.points = int(total)
+	result.residual = total - f32(result.points)
+	return result
 }
 
 Hazard_Outcome :: struct {

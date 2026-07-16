@@ -3,6 +3,7 @@ package main
 import "core:math"
 
 ROAD_STEP :: f32(5.5)
+TRACK_SECTION_LENGTH :: 64
 TRACK_MIN_SPEED_PERCENT :: f32(52)
 TRACK_SPEED_RANGE_PERCENT :: f32(275)
 TRACK_MAX_SPEED_PERCENT :: TRACK_MIN_SPEED_PERCENT + TRACK_SPEED_RANGE_PERCENT
@@ -59,16 +60,15 @@ Track_Node :: struct {
 compose_track :: proc(nodes: []Track_Node, song_seed: u32, speed_limit: int = -1) {
 	count := len(nodes)
 	// Third pass composes six-second musical movements into a true 3D centerline.
-	SECTION_LENGTH :: 64
 	center_x, center_y, center_z, heading, pitch, distance: f32
 	section, previous_section := CLIMB, CLIMB
 	section_direction: f32 = 1
 	for node_i in 0 ..< count {
 		node := &nodes[node_i]
-		section_start := (node_i / SECTION_LENGTH) * SECTION_LENGTH
-		if node_i % SECTION_LENGTH == 0 {
+		section_start := (node_i / TRACK_SECTION_LENGTH) * TRACK_SECTION_LENGTH
+		if node_i % TRACK_SECTION_LENGTH == 0 {
 			previous_section = section
-			end := min(count, node_i + SECTION_LENGTH)
+			end := min(count, node_i + TRACK_SECTION_LENGTH)
 			bass, mid, high, pace: f32
 			for look in node_i ..< end {
 				bass += nodes[look].bass
@@ -92,7 +92,7 @@ compose_track :: proc(nodes: []Track_Node, song_seed: u32, speed_limit: int = -1
 			}
 		}
 		node.section = section
-		phase := f32(node_i - section_start) / f32(SECTION_LENGTH)
+		phase := f32(node_i - section_start) / f32(TRACK_SECTION_LENGTH)
 		seed := song_seed ~ (u32(node_i) * 1664525 + 1013904223)
 
 		node.lane = i32(seed % 3) - 1
@@ -104,7 +104,7 @@ compose_track :: proc(nodes: []Track_Node, song_seed: u32, speed_limit: int = -1
 		roll := int((seed >> 8) % 100)
 		if node.kind == 0 && node_i > 0 && node_i % 200 == 100 {
 			node.kind = SHIELD
-		} else if node.kind == 0 && node_i % SECTION_LENGTH == 3 {
+		} else if node.kind == 0 && node_i % TRACK_SECTION_LENGTH == 3 {
 			node.kind = BOOST
 		} else if node.kind == 0 && node.pace > 0.48 && node_i % 5 == 2 && roll < 78 {
 			node.kind = HAZARD
@@ -159,10 +159,10 @@ compose_track :: proc(nodes: []Track_Node, song_seed: u32, speed_limit: int = -1
 		center_z += f32(math.cos(f64(heading))) * horizontal_step
 		distance += step_distance
 
-		if node_i % SECTION_LENGTH == 0 do node.feature = PORTAL
+		if node_i % TRACK_SECTION_LENGTH == 0 do node.feature = PORTAL
 		if section == TUNNEL && node_i % 4 == 0 do node.feature = ARCH
 		if node.beat > 0.65 do node.feature = GATE
-		if node_i % SECTION_LENGTH == 0 && previous_section == CLIMB && section == DROP do node.feature = RAMP
+		if node_i % TRACK_SECTION_LENGTH == 0 && previous_section == CLIMB && section == DROP do node.feature = RAMP
 		if node_i > 0 && node.pace - nodes[node_i - 1].pace > 0.16 do node.feature = RAMP
 		node.curve_x, node.curve_y, node.curve_z = center_x, center_y, center_z
 		node.heading, node.pitch, node.distance = heading, pitch, distance
