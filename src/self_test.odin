@@ -688,8 +688,7 @@ test_gameplay_and_rendering :: proc() {
 		}
 	}
 	assert(
-		drift_totals[0] == drift_totals[1] &&
-		drift_totals[0] == int(DRIFT_MAX_POINTS_PER_SECOND),
+		drift_totals[0] == drift_totals[1] && drift_totals[0] == int(DRIFT_MAX_POINTS_PER_SECOND),
 		"drift scoring must be independent of frame rate",
 	)
 	paused_drift := drift_score_step(0.4, 0.68, -1, 0)

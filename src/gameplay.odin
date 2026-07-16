@@ -136,10 +136,10 @@ overlay_visibility :: proc(hud_mode: Hud_Mode, finished: bool) -> Overlay_Visibi
 }
 
 Section_Mastery_State :: struct {
-	section_index:                    int,
-	node_count, pickup_count:         int,
-	pickups_seen, pickups_collected:  int,
-	missed, active:                   bool,
+	section_index:                   int,
+	node_count, pickup_count:        int,
+	pickups_seen, pickups_collected: int,
+	missed, active:                  bool,
 }
 
 Section_Mastery_Outcome :: struct {
@@ -159,8 +159,8 @@ begin_section_mastery :: proc(nodes: []Track_Node, node_index: int) -> Section_M
 	end := min(len(nodes), start + TRACK_SECTION_LENGTH)
 	state := Section_Mastery_State {
 		section_index = section_index,
-		node_count = end - start,
-		active = true,
+		node_count    = end - start,
+		active        = true,
 	}
 	for i in start ..< end {
 		if nodes[i].kind == PICKUP do state.pickup_count += 1
@@ -211,25 +211,15 @@ drift_score_rate :: proc(bank, player_lane: f32) -> f32 {
 	// The outside lane is opposite the direction of the curve.
 	outer_lane := -clamp(player_lane, -1, 1) * turn_direction
 	if outer_lane <= DRIFT_MIN_OUTER_LANE do return 0
-	bank_strength := clamp(
-		(bank_magnitude - DRIFT_MIN_BANK) / (0.68 - DRIFT_MIN_BANK),
-		0,
-		1,
-	)
-	lane_strength := clamp(
-		(outer_lane - DRIFT_MIN_OUTER_LANE) / (1 - DRIFT_MIN_OUTER_LANE),
-		0,
-		1,
-	)
+	bank_strength := clamp((bank_magnitude - DRIFT_MIN_BANK) / (0.68 - DRIFT_MIN_BANK), 0, 1)
+	lane_strength := clamp((outer_lane - DRIFT_MIN_OUTER_LANE) / (1 - DRIFT_MIN_OUTER_LANE), 0, 1)
 	return DRIFT_MAX_POINTS_PER_SECOND * bank_strength * lane_strength
 }
 
-drift_score_step :: proc(
-	residual, bank, player_lane, delta_time: f32,
-) -> Drift_Score_Step {
+drift_score_step :: proc(residual, bank, player_lane, delta_time: f32) -> Drift_Score_Step {
 	result := Drift_Score_Step {
 		residual = clamp(residual, 0, 0.999999),
-		rate = drift_score_rate(bank, player_lane),
+		rate     = drift_score_rate(bank, player_lane),
 	}
 	if result.rate <= 0 || delta_time <= 0 do return result
 	total := result.residual + result.rate * delta_time
