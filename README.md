@@ -55,10 +55,10 @@ of the entire ride.
 ## Quick start
 
 The shortest route needs [`just`](https://github.com/casey/just), `curl`, `tar`,
-and the [platform linker required by Odin](https://odin-lang.org/docs/install/).
+`jq`, and the [platform linker required by Odin](https://odin-lang.org/docs/install/).
 The first build downloads the latest
-[official Odin release](https://github.com/odin-lang/Odin/releases) into the
-ignored `./odin-dev` directory; later builds reuse it.
+[official Odin release](https://github.com/odin-lang/Odin/releases) into
+`$HOME/odin-dev`; later builds reuse it.
 The bootstrap supports Linux and macOS on AMD64 and ARM64.
 
 ```sh
