@@ -74,7 +74,7 @@ main :: proc() {
 			fmt.eprintln("psycho: unsupported or invalid audio file")
 			return
 		}
-		movements: [4]int
+		movements: [TRACK_SECTION_KIND_COUNT]int
 		traffic, surprises: int
 		previous_section: i32 = -1
 		for node in nodes {
@@ -86,11 +86,12 @@ main :: proc() {
 			if node.feature != 0 do surprises += 1
 		}
 		fmt.printfln(
-			"map: composed %d climbs, %d drops, %d slaloms, %d tunnels, %d traffic, %d gates",
+			"map: composed %d climbs, %d drops, %d slaloms, %d tunnels, %d spirals, %d traffic, %d gates",
 			movements[CLIMB],
 			movements[DROP],
 			movements[SLALOM],
 			movements[TUNNEL],
+			movements[SPIRAL],
 			traffic,
 			surprises,
 		)
@@ -584,7 +585,13 @@ main :: proc() {
 				rl.DrawRectangle(fps_x - 8, 120, fps_width + 16, 25, rl.Color{2, 4, 16, 205})
 				rl.DrawText(fps_label, fps_x, 124, 17, rl.Color{80, 235, 255, 255})
 			}
-			section_names := [4]cstring{"CLIMB", "DROP", "SLALOM", "TUNNEL"}
+			section_names := [TRACK_SECTION_KIND_COUNT]cstring {
+				"CLIMB",
+				"DROP",
+				"SLALOM",
+				"TUNNEL",
+				"SPIRAL",
+			}
 			rl.DrawText(
 				rl.TextFormat(
 					"%s  SPEED %.0f%%",

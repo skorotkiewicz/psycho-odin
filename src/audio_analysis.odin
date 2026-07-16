@@ -8,7 +8,7 @@ import "core:os"
 import rl "vendor:raylib"
 
 MAP_MAGIC :: u64(0x50535943484f3031) // PSYCHO01
-MAP_VERSION :: u32(1)
+MAP_VERSION :: u32(2)
 STEP :: f32(0.10)
 
 Cache_Header :: struct {

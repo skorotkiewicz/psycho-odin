@@ -211,7 +211,6 @@ test_track_and_geometry :: proc() {
 	min_x, max_x := nodes[0].curve_x, nodes[0].curve_x
 	min_y, max_y := nodes[0].curve_y, nodes[0].curve_y
 	min_turn, max_turn, min_pitch, max_pitch: f32
-	min_turn_i, max_turn_i: int
 	for node in nodes {
 		min_x, max_x = min(min_x, node.curve_x), max(max_x, node.curve_x)
 		min_y, max_y = min(min_y, node.curve_y), max(max_y, node.curve_y)
@@ -237,24 +236,16 @@ test_track_and_geometry :: proc() {
 		assert(abs(pitch - nodes[i].pitch) < 0.001, "cached pitch must match centerline tangent")
 		if i > 0 {
 			turn := nodes[i].heading - nodes[i - 1].heading
-			if turn < min_turn {
-				min_turn = turn
-				min_turn_i = i
-			}
-			if turn > max_turn {
-				max_turn = turn
-				max_turn_i = i
-			}
+			min_turn = min(min_turn, turn)
+			max_turn = max(max_turn, turn)
 		}
 		min_pitch = min(min_pitch, pitch)
 		max_pitch = max(max_pitch, pitch)
 	}
 	fmt.printfln(
-		"self-test: local turn %.1f° left @%d / %.1f° right @%d; pitch %.1f° up / %.1f° down",
+		"self-test: local turn %.1f° left / %.1f° right; pitch %.1f° up / %.1f° down",
 		f64(max_turn) * 180 / math.PI,
-		max_turn_i,
 		f64(min_turn) * 180 / math.PI,
-		min_turn_i,
 		f64(max_pitch) * 180 / math.PI,
 		f64(min_pitch) * 180 / math.PI,
 	)
@@ -1054,6 +1045,7 @@ test_analysis_dynamics :: proc() {
 }
 
 test_map_cache :: proc() {
+	assert(MAP_VERSION == 2, "SPIRAL generation must invalidate four-movement caches")
 	nodes := [3]Track_Node {
 		{curve_z = 1.25, heading = 0.1, pitch = -0.2, lane = -1},
 		{curve_z = 3.50, heading = 0.2, pitch = 0.3, lane = 0},
@@ -1071,8 +1063,9 @@ test_map_cache :: proc() {
 	)
 	assert(loaded[len(loaded) - 1].curve_z == nodes[len(nodes) - 1].curve_z)
 
-	bad_headers := [3]Cache_Header {
+	bad_headers := [4]Cache_Header {
 		{magic = 0, version = MAP_VERSION, count = 1},
+		{magic = MAP_MAGIC, version = MAP_VERSION - 1, count = 1},
 		{magic = MAP_MAGIC, version = MAP_VERSION + 1, count = 1},
 		{magic = MAP_MAGIC, version = MAP_VERSION, count = 10_000_001},
 	}
