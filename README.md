@@ -123,7 +123,7 @@ audio file
           │
           ├─ quiet       → climb, cool palette, slower travel
           ├─ energetic   → descent, hot palette, faster travel
-          └─ spectrum    → climbs, drops, slaloms, tunnels
+          └─ spectrum    → climbs, drops, slaloms, tunnels, spirals
           │
           ▼
    cached closed-loop 3D course
@@ -175,8 +175,8 @@ just build       # optimized release build
 
 The deterministic self-test exercises the binaural DSP dry path, ramps and
 headroom alongside audio analysis, tempo response, climbs and drops, left/right
-curvature, loop closure, camera continuity, near-camera road safety, perfect
-sections, and frame-rate-independent drift scoring.
+curvature, loop closure, camera continuity, near-camera road safety, cached
+spiral turns, perfect sections, and frame-rate-independent drift scoring.
 
 ## Inspiration and comfort
 

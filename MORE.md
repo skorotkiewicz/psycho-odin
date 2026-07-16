@@ -3,9 +3,9 @@
 An audio-reactive puzzle racer in Odin and raylib. It analyzes song-relative
 bass, mids, highs, robust dynamic range, adaptive transients, local beat density,
 and tempo confidence, then composes six-second musical movements: quiet climbs,
-bass-heavy drops, mid-driven slaloms, and treble tunnels. Each has distinct
-curves, banking, width, speed, traffic choreography, gates, portals, scenery,
-hazards, boosts, and powerups.
+bass-heavy drops, mid-driven slaloms, treble tunnels, and ascending coils for
+sustained energetic mids. Each has distinct curves, banking, width, speed,
+traffic choreography, gates, portals, scenery, hazards, boosts, and powerups.
 Generated maps are cached by audio-content hash.
 
 Every tenth of a second, local song-relative energy and onset density become a
