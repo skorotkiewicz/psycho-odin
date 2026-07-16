@@ -80,9 +80,20 @@ close_track_loop :: proc(nodes: []Track_Node) {
 			start_sin := f32(math.sin(f64(start_node.heading)))
 			local_lateral := draft_x * start_cos - draft_z * start_sin
 			local_forward := draft_x * start_sin + draft_z * start_cos
-			max_offset := loop_radius * 0.38
-			local_lateral = clamp(local_lateral, -max_offset, max_offset)
-			local_forward = clamp(local_forward, -max_offset, max_offset)
+			max_draft: f32
+			for draft_i in section_start ..= section_end {
+				draft_phase := f32(draft_i - section_start) / f32(section_span)
+				draft_baseline_x :=
+					start_node.curve_x + (end_node.curve_x - start_node.curve_x) * draft_phase
+				draft_baseline_z :=
+					start_node.curve_z + (end_node.curve_z - start_node.curve_z) * draft_phase
+				dx := nodes[draft_i].curve_x - draft_baseline_x
+				dz := nodes[draft_i].curve_z - draft_baseline_z
+				max_draft = max(max_draft, f32(math.sqrt(f64(dx * dx + dz * dz))))
+			}
+			preserve_scale := loop_radius * 1.20 / max(0.001, max_draft)
+			local_lateral *= preserve_scale
+			local_forward *= preserve_scale
 			radial_x := -f32(math.cos(f64(theta)))
 			radial_z := f32(math.sin(f64(theta)))
 			tangent_x := f32(math.sin(f64(theta)))
