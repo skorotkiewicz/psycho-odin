@@ -536,6 +536,12 @@ test_gameplay_and_rendering :: proc() {
 	assert(ride_controls_enabled(false, false), "steering must work during an active ride")
 	assert(!ride_controls_enabled(true, false), "steering must stop while paused")
 	assert(!ride_controls_enabled(false, true), "steering must stop after the ride finishes")
+	assert(should_catch_up_final_nodes(9, 12))
+	assert(should_catch_up_final_nodes(11, 12))
+	assert(
+		!should_catch_up_final_nodes(4, 12),
+		"an early playback failure must not process the unplayed remainder",
+	)
 	pilot_nodes: [12]Track_Node
 	pilot_nodes[3] = {
 		kind = HAZARD,
@@ -704,6 +710,17 @@ test_gameplay_and_rendering :: proc() {
 	)
 	paused_drift := drift_score_step(0.4, 0.68, -1, 0)
 	assert(paused_drift.points == 0 && paused_drift.residual == 0.4)
+	drift_interval_nodes: [5]Track_Node
+	interval_headings := [5]f32{0, 0.2, 0.4, 0.2, 0}
+	for i in 0 ..< len(drift_interval_nodes) {
+		drift_interval_nodes[i].curve_z = f32(i)
+		drift_interval_nodes[i].heading = interval_headings[i]
+	}
+	mixed_interval := drift_score_interval(drift_interval_nodes[:], 0, -1, 0, 0.5)
+	assert(
+		mixed_interval.points > 0 && mixed_interval.points < 30,
+		"a playback jump must integrate changing turns instead of using only its endpoint bank",
+	)
 	protected_hazard := resolve_hazard(2, 1500, 7, 3, 1, 4, 0.01)
 	assert(protected_hazard.blocked, "overdrive must block hazard damage")
 	assert(

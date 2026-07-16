@@ -9,6 +9,7 @@ SECTION_CLEAR_POINTS_PER_NODE :: 10
 DRIFT_MIN_BANK :: f32(0.14)
 DRIFT_MIN_OUTER_LANE :: f32(0.55)
 DRIFT_MAX_POINTS_PER_SECOND :: f32(90)
+PLAYBACK_FINISH_CATCHUP_NODES :: 2
 
 SECRET_OVERDRIVE_SECONDS :: f32(999)
 SECRET_SEQUENCE_TIMEOUT :: f32(5)
@@ -102,6 +103,12 @@ ride_finished :: proc(paused, playback_seen, music_playing: bool) -> bool {
 
 ride_controls_enabled :: proc(paused, finished: bool) -> bool {
 	return !paused && !finished
+}
+
+should_catch_up_final_nodes :: proc(current, node_count: int) -> bool {
+	if node_count <= 0 || current < 0 || current >= node_count do return false
+	remaining := node_count - 1 - current
+	return remaining <= PLAYBACK_FINISH_CATCHUP_NODES
 }
 
 Hud_Mode :: enum {
@@ -225,6 +232,39 @@ drift_score_step :: proc(residual, bank, player_lane, delta_time: f32) -> Drift_
 	total := result.residual + result.rate * delta_time
 	result.points = int(total)
 	result.residual = total - f32(result.points)
+	return result
+}
+
+drift_score_interval :: proc(
+	nodes: []Track_Node,
+	residual, player_lane, start_time, end_time: f32,
+) -> Drift_Score_Step {
+	result := Drift_Score_Step {
+		residual = clamp(residual, 0, 0.999999),
+	}
+	start := max(0, start_time)
+	finish := max(start, end_time)
+	if len(nodes) == 0 || finish <= start do return result
+
+	first_sample := max(0, int(start / STEP))
+	last_sample := max(first_sample, int(finish / STEP))
+	for sample_i in first_sample ..= last_sample {
+		segment_start := max(start, f32(sample_i) * STEP)
+		segment_end := min(finish, f32(sample_i + 1) * STEP)
+		segment_duration := segment_end - segment_start
+		if segment_duration <= 0 do continue
+		node_i := clamp(sample_i, 0, len(nodes) - 1)
+		step := drift_score_step(
+			result.residual,
+			road_bank(nodes, node_i),
+			player_lane,
+			segment_duration,
+		)
+		result.residual = step.residual
+		result.points += step.points
+	}
+	end_node := clamp(int(max(start, finish - 0.000001) / STEP), 0, len(nodes) - 1)
+	result.rate = drift_score_rate(road_bank(nodes, end_node), player_lane)
 	return result
 }
 

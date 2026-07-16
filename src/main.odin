@@ -287,7 +287,7 @@ main :: proc() {
 		}
 
 		time_played := rl.GetMusicTimePlayed(music)
-		drift_elapsed := max(0, time_played - previous_music_time)
+		drift_start_time := previous_music_time
 		previous_music_time = time_played
 		node_time := time_played / STEP
 		current := clamp(int(node_time), 0, len(nodes) - 1)
@@ -295,24 +295,28 @@ main :: proc() {
 		music_playing := rl.IsMusicStreamPlaying(music)
 		if music_playing do playback_seen = true
 		finished = ride_finished(paused, playback_seen, music_playing)
-		if finished {
+		if finished && should_catch_up_final_nodes(current, len(nodes)) {
 			// Raylib can report stopped playback before exposing the final sample time.
-			// Process the remaining cached nodes once so their gameplay is not skipped.
+			// Process a small end gap once, without treating an early stream failure as a clear.
 			current = len(nodes) - 1
 			fraction = 1
 		}
 		drift_rate = 0
-		if !paused && playback_seen && drift_elapsed > 0 {
-			drift_step := drift_score_step(
-				drift_residual,
-				road_bank(nodes, current),
-				player_lane,
-				drift_elapsed,
-			)
-			drift_residual = drift_step.residual
-			drift_rate = drift_step.rate
-			score += drift_step.points
-			drift_total += drift_step.points
+		if !paused && playback_seen {
+			if !finished do drift_rate = drift_score_rate(road_bank(nodes, current), player_lane)
+			if time_played > drift_start_time {
+				drift_step := drift_score_interval(
+					nodes,
+					drift_residual,
+					player_lane,
+					drift_start_time,
+					time_played,
+				)
+				drift_residual = drift_step.residual
+				if !finished do drift_rate = drift_step.rate
+				score += drift_step.points
+				drift_total += drift_step.points
+			}
 		}
 		rhythm_impulse: f32
 		if current > last_index {
@@ -414,7 +418,7 @@ main :: proc() {
 		if finished && section_mastery.active {
 			section_outcome := finish_section_mastery(section_mastery)
 			section_mastery = section_outcome.state
-			if section_outcome.perfect {
+			if current == len(nodes) - 1 && section_outcome.perfect {
 				score += section_outcome.bonus
 				perfect_sections += 1
 				last_section_bonus = section_outcome.bonus
