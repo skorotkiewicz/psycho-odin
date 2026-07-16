@@ -73,6 +73,52 @@ test_audio_fx :: proc() {
 }
 
 test_track_and_geometry :: proc() {
+	assert(track_section_for_music(0.1, 0.1, 0.05, 0.2) == CLIMB)
+	assert(track_section_for_music(0.5, 0.2, 0.1, 0.6) == DROP)
+	assert(track_section_for_music(0.2, 0.25, 0.1, 0.5) == SLALOM)
+	assert(track_section_for_music(0.1, 0.2, 0.15, 0.5) == TUNNEL)
+	assert(track_section_for_music(0.1, 0.5, 0.1, 0.5) == SPIRAL)
+	assert(track_section_for_music(0.1, 0.5, 0.1, SPIRAL_MIN_PACE - 0.01) == SLALOM)
+	assert(
+		track_section_for_music(0.1, SPIRAL_MIN_MID - 0.01, 0.1, 0.5) == SLALOM,
+		"moderate mids must retain the existing slalom movement",
+	)
+	spiral_heading, reverse_spiral_heading: f32
+	for _ in 0 ..< TRACK_SECTION_LENGTH {
+		target := spiral_heading_target(spiral_heading, 1)
+		spiral_heading =
+			spiral_heading * (1 - TRACK_HEADING_BLEND) + target * TRACK_HEADING_BLEND
+		reverse_target := spiral_heading_target(reverse_spiral_heading, -1)
+		reverse_spiral_heading =
+			reverse_spiral_heading * (1 - TRACK_HEADING_BLEND) +
+			reverse_target * TRACK_HEADING_BLEND
+	}
+	assert(abs(spiral_heading - f32(2 * math.PI)) < 0.001)
+	assert(abs(reverse_spiral_heading + f32(2 * math.PI)) < 0.001)
+	assert(spiral_pitch_base(0) > 0 && spiral_pitch_base(0.75) > 0)
+
+	spiral_nodes := make([]Track_Node, TRACK_SECTION_LENGTH * 2)
+	defer delete(spiral_nodes)
+	for &node in spiral_nodes {
+		node.bass = 0.1
+		node.mid = 0.6
+		node.high = 0.1
+		node.pace = 0.7
+	}
+	compose_track(spiral_nodes, 12345)
+	for node in spiral_nodes {
+		assert(node.section == SPIRAL)
+		assert(abs(node.width - 4.55) < 0.001)
+	}
+	assert(track_is_closed(spiral_nodes))
+	spiral_cached_turn: f32
+	for i in 0 ..< TRACK_SECTION_LENGTH - 1 {
+		spiral_cached_turn += wrapped_angle_delta(spiral_nodes[i + 1].heading, spiral_nodes[i].heading)
+	}
+	fmt.printfln("self-test: spiral cached turn %.1f°", f64(spiral_cached_turn) * 180 / math.PI)
+	spiral_camera_y, spiral_camera_samples := fast_camera_min_y(spiral_nodes)
+	assert(spiral_camera_samples > 0 && spiral_camera_y >= CHASE_CAMERA_MIN_Y)
+
 	rate := 8000
 	samples := make([]f32, rate * 24)
 	defer delete(samples)
@@ -134,13 +180,21 @@ test_track_and_geometry :: proc() {
 	assert(seam_bank_error < 0.08, "the loop seam must preserve road banking")
 	assert(abs(last.width - first.width) < 0.001, "the loop seam must preserve road width")
 	pickups, hazards, features: int
-	sections: bit_set[0 ..< 4]
+	sections: bit_set[0 ..< TRACK_SECTION_KIND_COUNT]
 	for node in nodes {
 		if node.kind == PICKUP do pickups += 1
 		if node.kind == HAZARD do hazards += 1
 		if node.feature != 0 do features += 1
 		sections += {int(node.section)}
 	}
+	fmt.printfln(
+		"self-test: movement kinds climb=%v drop=%v slalom=%v tunnel=%v spiral=%v",
+		int(CLIMB) in sections,
+		int(DROP) in sections,
+		int(SLALOM) in sections,
+		int(TUNNEL) in sections,
+		int(SPIRAL) in sections,
+	)
 	min_x, max_x := nodes[0].curve_x, nodes[0].curve_x
 	min_y, max_y := nodes[0].curve_y, nodes[0].curve_y
 	min_turn, max_turn, min_pitch, max_pitch: f32

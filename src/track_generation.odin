@@ -4,9 +4,17 @@ import "core:math"
 
 ROAD_STEP :: f32(5.5)
 TRACK_SECTION_LENGTH :: 64
+TRACK_SECTION_KIND_COUNT :: 5
 TRACK_MIN_SPEED_PERCENT :: f32(52)
 TRACK_SPEED_RANGE_PERCENT :: f32(275)
 TRACK_MAX_SPEED_PERCENT :: TRACK_MIN_SPEED_PERCENT + TRACK_SPEED_RANGE_PERCENT
+TRACK_HEADING_BLEND :: f32(0.20)
+
+SPIRAL_MIN_MID :: f32(0.28)
+SPIRAL_MIN_PACE :: f32(0.40)
+SPIRAL_BASS_DOMINANCE :: f32(1.25)
+SPIRAL_HIGH_DOMINANCE :: f32(2.0)
+SPIRAL_TURN_RADIANS_PER_NODE :: f32(2 * math.PI / TRACK_SECTION_LENGTH)
 
 track_speed_multiplier :: proc(pace: f32, speed_limit: int = -1) -> f32 {
 	p := clamp(pace, 0, 1)
@@ -36,6 +44,7 @@ CLIMB :: i32(0)
 DROP :: i32(1)
 SLALOM :: i32(2)
 TUNNEL :: i32(3)
+SPIRAL :: i32(4)
 
 GATE :: i32(1)
 ARCH :: i32(2)
@@ -57,6 +66,27 @@ Track_Node :: struct {
 	section, feature: i32,
 }
 
+track_section_for_music :: proc(bass, mid, high, pace: f32) -> i32 {
+	if mid >= SPIRAL_MIN_MID &&
+	   pace >= SPIRAL_MIN_PACE &&
+	   mid >= bass * SPIRAL_BASS_DOMINANCE &&
+	   mid >= high * SPIRAL_HIGH_DOMINANCE {
+		return SPIRAL
+	}
+	if high > bass && high > mid * 0.28 do return TUNNEL
+	if pace < 0.32 do return CLIMB
+	if bass >= mid && bass >= high do return DROP
+	return SLALOM
+}
+
+spiral_heading_target :: proc(heading, direction: f32) -> f32 {
+	return heading + clamp(direction, -1, 1) * SPIRAL_TURN_RADIANS_PER_NODE / TRACK_HEADING_BLEND
+}
+
+spiral_pitch_base :: proc(phase: f32) -> f32 {
+	return 0.075 + f32(math.sin(f64(clamp(phase, 0, 1) * 2 * math.PI))) * 0.025
+}
+
 compose_track :: proc(nodes: []Track_Node, song_seed: u32, speed_limit: int = -1) {
 	count := len(nodes)
 	// Third pass composes six-second musical movements into a true 3D centerline.
@@ -68,6 +98,11 @@ compose_track :: proc(nodes: []Track_Node, song_seed: u32, speed_limit: int = -1
 		section_start := (node_i / TRACK_SECTION_LENGTH) * TRACK_SECTION_LENGTH
 		if node_i % TRACK_SECTION_LENGTH == 0 {
 			previous_section = section
+			if previous_section == SPIRAL {
+				// A full revolution is orientation-equivalent to zero; wrapping here keeps
+				// the following section from numerically unwinding the completed coil.
+				heading = wrapped_angle_delta(heading, 0)
+			}
 			end := min(count, node_i + TRACK_SECTION_LENGTH)
 			bass, mid, high, pace: f32
 			for look in node_i ..< end {
@@ -78,10 +113,7 @@ compose_track :: proc(nodes: []Track_Node, song_seed: u32, speed_limit: int = -1
 			}
 			n := f32(max(1, end - node_i))
 			bass, mid, high, pace = bass / n, mid / n, high / n, pace / n
-			if high > bass && high > mid * 0.28 do section = TUNNEL
-			else if pace < 0.32 do section = CLIMB
-			else if bass >= mid && bass >= high do section = DROP
-			else do section = SLALOM
+			section = track_section_for_music(bass, mid, high, pace)
 			if node_i == 0 {
 				section_direction = 1
 				if (song_seed & 1) == 0 do section_direction = -1
@@ -119,6 +151,7 @@ compose_track :: proc(nodes: []Track_Node, song_seed: u32, speed_limit: int = -1
 		pace_curve := node.pace * node.pace * (3 - 2 * node.pace)
 		heading_target: f32
 		pitch_wave: f32
+		pitch_base := 0.22 - pace_curve * 0.56
 		switch section {
 		case CLIMB:
 			heading_target =
@@ -144,13 +177,17 @@ compose_track :: proc(nodes: []Track_Node, song_seed: u32, speed_limit: int = -1
 				section_direction
 			pitch_wave = f32(math.sin(f64(phase * 4 * math.PI))) * 0.13
 			node.width = 4.35
+		case SPIRAL:
+			heading_target = spiral_heading_target(heading, section_direction)
+			pitch_base = spiral_pitch_base(phase)
+			node.width = 4.55
 		}
 		pitch_target := clamp(
-			0.22 - pace_curve * 0.56 - node.onset * 0.05 + pitch_wave - center_y * 0.000015,
+			pitch_base - node.onset * 0.05 + pitch_wave - center_y * 0.000015,
 			-0.38,
 			0.30,
 		)
-		heading = heading * 0.80 + heading_target * 0.20
+		heading = heading * (1 - TRACK_HEADING_BLEND) + heading_target * TRACK_HEADING_BLEND
 		pitch = pitch * 0.78 + pitch_target * 0.22
 		step_distance := ROAD_STEP * track_speed_multiplier(node.pace, speed_limit)
 		horizontal_step := f32(math.cos(f64(pitch))) * step_distance
