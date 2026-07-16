@@ -172,7 +172,7 @@ main :: proc() {
 	mouse_active := false
 	show_fps := false
 	hud_mode: Hud_Mode = .FULL
-	last_index := 0
+	last_index := -1
 	score, streak, best_streak, color_chain, crashes: int
 	perfect_sections, last_section_bonus, drift_total: int
 	last_tone: i32
@@ -185,7 +185,7 @@ main :: proc() {
 	visual_fx := config.visual_fx
 	visual_amount := config.visual_strength
 	pulse, shake, overdrive, section_bonus_flash: f32
-	drift_residual, drift_rate: f32
+	drift_residual, drift_rate, previous_music_time: f32
 	rhythm_push: Rhythm_Push
 	secret_sequence: Secret_Sequence_State
 	ghost_pilot := false
@@ -287,16 +287,27 @@ main :: proc() {
 		}
 
 		time_played := rl.GetMusicTimePlayed(music)
+		drift_elapsed := max(0, time_played - previous_music_time)
+		previous_music_time = time_played
 		node_time := time_played / STEP
 		current := clamp(int(node_time), 0, len(nodes) - 1)
 		fraction := clamp(node_time - f32(current), 0, 1)
+		music_playing := rl.IsMusicStreamPlaying(music)
+		if music_playing do playback_seen = true
+		finished = ride_finished(paused, playback_seen, music_playing)
+		if finished {
+			// Raylib can report stopped playback before exposing the final sample time.
+			// Process the remaining cached nodes once so their gameplay is not skipped.
+			current = len(nodes) - 1
+			fraction = 1
+		}
 		drift_rate = 0
-		if ride_controls_enabled(paused, finished) {
+		if !paused && playback_seen && drift_elapsed > 0 {
 			drift_step := drift_score_step(
 				drift_residual,
 				road_bank(nodes, current),
 				player_lane,
-				dt,
+				drift_elapsed,
 			)
 			drift_residual = drift_step.residual
 			drift_rate = drift_step.rate
@@ -400,9 +411,6 @@ main :: proc() {
 		overdrive = max(0, overdrive - dt)
 		section_bonus_flash = max(0, section_bonus_flash - dt)
 		audio_fx_set_beat_hz(4 + nodes[current].bass * 6)
-		music_playing := rl.IsMusicStreamPlaying(music)
-		if music_playing do playback_seen = true
-		finished = ride_finished(paused, playback_seen, music_playing)
 		if finished && section_mastery.active {
 			section_outcome := finish_section_mastery(section_mastery)
 			section_mastery = section_outcome.state
@@ -453,12 +461,12 @@ main :: proc() {
 			rl.PlayMusicStream(music)
 			playback_seen = rl.IsMusicStreamPlaying(music)
 			last_index, score, streak, best_streak, color_chain, last_tone, crashes =
-				0, 0, 0, 0, 0, -1, 0
+				-1, 0, 0, 0, 0, -1, 0
 			perfect_sections, last_section_bonus, drift_total = 0, 0, 0
 			shield = 3
 			section_mastery = begin_section_mastery(nodes, 0)
 			overdrive, section_bonus_flash = 0, 0
-			drift_residual, drift_rate = 0, 0
+			drift_residual, drift_rate, previous_music_time = 0, 0, 0
 			rhythm_push = {}
 			secret_sequence = {}
 			ghost_pilot = false
@@ -701,16 +709,28 @@ main :: proc() {
 			)
 			rl.DrawText(
 				rl.TextFormat(
-					"BEST STREAK  %d   PERFECT  %d   DRIFT  %d   CRASHES  %d",
+					"BEST STREAK  %d     CRASHES  %d     TIME  %02d:%02d",
 					best_streak,
-					perfect_sections,
-					drift_total,
 					crashes,
+					int(music_duration) / 60,
+					int(music_duration) % 60,
 				),
 				panel_x + 36,
 				panel_y + 176,
 				20,
 				rl.Color{210, 220, 245, 255},
+			)
+			mastery_label := rl.TextFormat(
+				"PERFECT SECTIONS  %d     DRIFT POINTS  %d",
+				perfect_sections,
+				drift_total,
+			)
+			rl.DrawText(
+				mastery_label,
+				w / 2 - rl.MeasureText(mastery_label, 18) / 2,
+				panel_y + 204,
+				18,
+				rl.Color{120, 235, 255, 255},
 			)
 			display_song_best := max(score, personal_bests.song_score)
 			display_overall_best := max(score, personal_bests.overall_score)
@@ -728,7 +748,7 @@ main :: proc() {
 			rl.DrawText(
 				best_label,
 				w / 2 - rl.MeasureText(best_label, 19) / 2,
-				panel_y + 215,
+				panel_y + 235,
 				19,
 				best_color,
 			)
@@ -741,7 +761,7 @@ main :: proc() {
 			rl.DrawText(
 				save_label,
 				w / 2 - rl.MeasureText(save_label, 17) / 2,
-				panel_y + 253,
+				panel_y + 273,
 				17,
 				save_color,
 			)

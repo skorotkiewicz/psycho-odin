@@ -627,6 +627,7 @@ test_gameplay_and_rendering :: proc() {
 		"F3 must never hide the completed-ride results screen",
 	)
 	mastery_nodes: [TRACK_SECTION_LENGTH + 16]Track_Node
+	mastery_nodes[0].kind = PICKUP
 	mastery_nodes[5].kind = PICKUP
 	mastery_nodes[31].kind = PICKUP
 	mastery_nodes[TRACK_SECTION_LENGTH + 4].kind = PICKUP
@@ -635,8 +636,9 @@ test_gameplay_and_rendering :: proc() {
 		perfect_section.active &&
 		perfect_section.section_index == 0 &&
 		perfect_section.node_count == TRACK_SECTION_LENGTH &&
-		perfect_section.pickup_count == 2,
+		perfect_section.pickup_count == 3,
 	)
+	perfect_section = record_section_pickup(perfect_section, true)
 	perfect_section = record_section_pickup(perfect_section, true)
 	perfect_section = record_section_pickup(perfect_section, true)
 	perfect_outcome := finish_section_mastery(perfect_section)
@@ -649,10 +651,17 @@ test_gameplay_and_rendering :: proc() {
 	assert(finish_section_mastery(perfect_outcome.state).bonus == 0)
 	missed_section := begin_section_mastery(mastery_nodes[:], 0)
 	missed_section = record_section_pickup(missed_section, true)
+	missed_section = record_section_pickup(missed_section, true)
 	missed_section = record_section_pickup(missed_section, false)
 	assert(
 		!finish_section_mastery(missed_section).perfect,
 		"missing any pickup must invalidate the section bonus",
+	)
+	unfinished_section := begin_section_mastery(mastery_nodes[:], 0)
+	unfinished_section = record_section_pickup(unfinished_section, true)
+	assert(
+		!finish_section_mastery(unfinished_section).perfect,
+		"a section must not clear before every pickup has been processed",
 	)
 	short_section := begin_section_mastery(mastery_nodes[:], TRACK_SECTION_LENGTH)
 	assert(short_section.node_count == 16 && short_section.pickup_count == 1)
@@ -676,9 +685,9 @@ test_gameplay_and_rendering :: proc() {
 	)
 	assert(drift_score_rate(DRIFT_MIN_BANK, -1) == 0)
 	assert(drift_score_rate(0.68, -DRIFT_MIN_OUTER_LANE) == 0)
-	frame_steps := [2]int{20, 60}
-	frame_rates := [2]f32{20, 60}
-	drift_totals: [2]int
+	frame_steps := [3]int{10, 20, 60}
+	frame_rates := [3]f32{10, 20, 60}
+	drift_totals: [3]int
 	for fixture_i in 0 ..< len(frame_steps) {
 		residual: f32
 		for _ in 0 ..< frame_steps[fixture_i] {
@@ -688,7 +697,9 @@ test_gameplay_and_rendering :: proc() {
 		}
 	}
 	assert(
-		drift_totals[0] == drift_totals[1] && drift_totals[0] == int(DRIFT_MAX_POINTS_PER_SECOND),
+		drift_totals[0] == drift_totals[1] &&
+		drift_totals[1] == drift_totals[2] &&
+		drift_totals[0] == int(DRIFT_MAX_POINTS_PER_SECOND),
 		"drift scoring must be independent of frame rate",
 	)
 	paused_drift := drift_score_step(0.4, 0.68, -1, 0)
