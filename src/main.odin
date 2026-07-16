@@ -174,15 +174,18 @@ main :: proc() {
 	hud_mode: Hud_Mode = .FULL
 	last_index := 0
 	score, streak, best_streak, color_chain, crashes: int
+	perfect_sections, last_section_bonus, drift_total: int
 	last_tone: i32
 	last_tone = -1
 	shield := 3
+	section_mastery := begin_section_mastery(nodes, 0)
 	paused, finished: bool
 	results_saved, result_save_ok: bool
 	new_song_best, new_overall_best: bool
 	visual_fx := config.visual_fx
 	visual_amount := config.visual_strength
-	pulse, shake, overdrive: f32
+	pulse, shake, overdrive, section_bonus_flash: f32
+	drift_residual, drift_rate: f32
 	rhythm_push: Rhythm_Push
 	secret_sequence: Secret_Sequence_State
 	ghost_pilot := false
@@ -287,6 +290,19 @@ main :: proc() {
 		node_time := time_played / STEP
 		current := clamp(int(node_time), 0, len(nodes) - 1)
 		fraction := clamp(node_time - f32(current), 0, 1)
+		drift_rate = 0
+		if ride_controls_enabled(paused, finished) {
+			drift_step := drift_score_step(
+				drift_residual,
+				road_bank(nodes, current),
+				player_lane,
+				dt,
+			)
+			drift_residual = drift_step.residual
+			drift_rate = drift_step.rate
+			score += drift_step.points
+			drift_total += drift_step.points
+		}
 		rhythm_impulse: f32
 		if current > last_index {
 			echo_rhythm := Rhythm_Motion {
@@ -294,6 +310,19 @@ main :: proc() {
 			}
 			echo_beat_strength := ship_echo_rhythm_strength(echo_rhythm)
 			for i in last_index + 1 ..= current {
+				node_section_index := section_index_for_node(i)
+				if !section_mastery.active || node_section_index != section_mastery.section_index {
+					section_outcome := finish_section_mastery(section_mastery)
+					if section_outcome.perfect {
+						score += section_outcome.bonus
+						perfect_sections += 1
+						last_section_bonus = section_outcome.bonus
+						section_bonus_flash = 2.2
+						pulse = 1
+						audio_fx_trigger_tingle()
+					}
+					section_mastery = begin_section_mastery(nodes, i)
+				}
 				node := nodes[i]
 				node_impulse := rhythm_impulse_strength(
 					max(node.onset, node.beat),
@@ -309,6 +338,10 @@ main :: proc() {
 						player_lane,
 						echo_beat_strength,
 						overdrive,
+					)
+					section_mastery = record_section_pickup(
+						section_mastery,
+						aligned || echo_aligned,
 					)
 					if aligned || echo_aligned {
 						streak += 1
@@ -365,10 +398,23 @@ main :: proc() {
 		pulse = max(0, pulse - dt * 2.8)
 		shake = max(0, shake - dt * 4.5)
 		overdrive = max(0, overdrive - dt)
+		section_bonus_flash = max(0, section_bonus_flash - dt)
 		audio_fx_set_beat_hz(4 + nodes[current].bass * 6)
 		music_playing := rl.IsMusicStreamPlaying(music)
 		if music_playing do playback_seen = true
 		finished = ride_finished(paused, playback_seen, music_playing)
+		if finished && section_mastery.active {
+			section_outcome := finish_section_mastery(section_mastery)
+			section_mastery = section_outcome.state
+			if section_outcome.perfect {
+				score += section_outcome.bonus
+				perfect_sections += 1
+				last_section_bonus = section_outcome.bonus
+				section_bonus_flash = 2.2
+				pulse = 1
+				audio_fx_trigger_tingle()
+			}
+		}
 		if finished && !results_saved {
 			new_song_best = beats_personal_best(
 				score,
@@ -408,8 +454,11 @@ main :: proc() {
 			playback_seen = rl.IsMusicStreamPlaying(music)
 			last_index, score, streak, best_streak, color_chain, last_tone, crashes =
 				0, 0, 0, 0, 0, -1, 0
+			perfect_sections, last_section_bonus, drift_total = 0, 0, 0
 			shield = 3
-			overdrive = 0
+			section_mastery = begin_section_mastery(nodes, 0)
+			overdrive, section_bonus_flash = 0, 0
+			drift_residual, drift_rate = 0, 0
 			rhythm_push = {}
 			secret_sequence = {}
 			ghost_pilot = false
@@ -545,6 +594,27 @@ main :: proc() {
 					rl.Color{255, 100, 50, 255},
 				)
 			}
+			if drift_rate > 0 {
+				drift_label := rl.TextFormat("OUTER-LANE DRIFT  +%.0f/s", drift_rate)
+				rl.DrawText(
+					drift_label,
+					w / 2 - rl.MeasureText(drift_label, 18) / 2,
+					88,
+					18,
+					rl.Color{90, 240, 255, 255},
+				)
+			}
+			if section_bonus_flash > 0 {
+				bonus_label := rl.TextFormat("PERFECT SECTION  +%d", last_section_bonus)
+				bonus_alpha := u8(clamp(section_bonus_flash / 2.2 * 255, 0, 255))
+				rl.DrawText(
+					bonus_label,
+					w / 2 - rl.MeasureText(bonus_label, 30) / 2,
+					h / 3,
+					30,
+					rl.Color{255, 220, 70, bonus_alpha},
+				)
+			}
 			fx_label: cstring = "BINAURAL FX: OFF [B]"
 			if audio_fx_channels < 2 {
 				fx_label = "BINAURAL FX: NEEDS STEREO"
@@ -631,11 +701,11 @@ main :: proc() {
 			)
 			rl.DrawText(
 				rl.TextFormat(
-					"BEST STREAK  %d     CRASHES  %d     TIME  %02d:%02d",
+					"BEST STREAK  %d   PERFECT  %d   DRIFT  %d   CRASHES  %d",
 					best_streak,
+					perfect_sections,
+					drift_total,
 					crashes,
-					int(music_duration) / 60,
-					int(music_duration) % 60,
 				),
 				panel_x + 36,
 				panel_y + 176,
