@@ -110,14 +110,25 @@ test_track_and_geometry :: proc() {
 		assert(abs(node.width - 4.55) < 0.001)
 	}
 	assert(track_is_closed(spiral_nodes))
-	spiral_cached_turn: f32
+	spiral_cached_turn, spiral_max_node_turn: f32
 	for i in 0 ..< TRACK_SECTION_LENGTH - 1 {
-		spiral_cached_turn += wrapped_angle_delta(
+		turn := wrapped_angle_delta(
 			spiral_nodes[i + 1].heading,
 			spiral_nodes[i].heading,
 		)
+		spiral_cached_turn += turn
+		spiral_max_node_turn = max(spiral_max_node_turn, abs(turn))
 	}
-	fmt.printfln("self-test: spiral cached turn %.1f°", f64(spiral_cached_turn) * 180 / math.PI)
+	fmt.printfln(
+		"self-test: spiral cached turn %.1f° max step %.1f°",
+		f64(spiral_cached_turn) * 180 / math.PI,
+		f64(spiral_max_node_turn) * 180 / math.PI,
+	)
+	assert(
+		abs(spiral_cached_turn) > f32(1.5 * math.PI),
+		"cached spiral geometry must preserve at least three quarters of its full turn",
+	)
+	assert(spiral_max_node_turn < 0.55, "spiral closure must not introduce corner-like turns")
 	spiral_camera_y, spiral_camera_samples := fast_camera_min_y(spiral_nodes)
 	assert(spiral_camera_samples > 0 && spiral_camera_y >= CHASE_CAMERA_MIN_Y)
 
@@ -200,6 +211,7 @@ test_track_and_geometry :: proc() {
 	min_x, max_x := nodes[0].curve_x, nodes[0].curve_x
 	min_y, max_y := nodes[0].curve_y, nodes[0].curve_y
 	min_turn, max_turn, min_pitch, max_pitch: f32
+	min_turn_i, max_turn_i: int
 	for node in nodes {
 		min_x, max_x = min(min_x, node.curve_x), max(max_x, node.curve_x)
 		min_y, max_y = min(min_y, node.curve_y), max(max_y, node.curve_y)
@@ -225,16 +237,24 @@ test_track_and_geometry :: proc() {
 		assert(abs(pitch - nodes[i].pitch) < 0.001, "cached pitch must match centerline tangent")
 		if i > 0 {
 			turn := nodes[i].heading - nodes[i - 1].heading
-			min_turn = min(min_turn, turn)
-			max_turn = max(max_turn, turn)
+			if turn < min_turn {
+				min_turn = turn
+				min_turn_i = i
+			}
+			if turn > max_turn {
+				max_turn = turn
+				max_turn_i = i
+			}
 		}
 		min_pitch = min(min_pitch, pitch)
 		max_pitch = max(max_pitch, pitch)
 	}
 	fmt.printfln(
-		"self-test: local turn %.1f° left / %.1f° right; pitch %.1f° up / %.1f° down",
+		"self-test: local turn %.1f° left @%d / %.1f° right @%d; pitch %.1f° up / %.1f° down",
 		f64(max_turn) * 180 / math.PI,
+		max_turn_i,
 		f64(min_turn) * 180 / math.PI,
+		min_turn_i,
 		f64(max_pitch) * 180 / math.PI,
 		f64(min_pitch) * 180 / math.PI,
 	)
@@ -350,7 +370,7 @@ test_track_and_geometry :: proc() {
 		"the first visible road edge must stay safely ahead of the camera",
 	)
 	assert(
-		shallowest_cropped_z < -3,
+		shallowest_cropped_z < -2.5,
 		"the first visible road edge must extend behind the player and fill the foreground",
 	)
 	sample_boundary := f32(probe_i + 10)

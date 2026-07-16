@@ -6,6 +6,7 @@ import rl "vendor:raylib"
 CHASE_CAMERA_Z :: f32(-6.35)
 CHASE_CAMERA_MIN_Y :: f32(2.25)
 ROAD_CAMERA_CLEARANCE :: f32(1.5)
+SPIRAL_CLOSURE_SCALE :: f32(2.5)
 
 closure_correction :: proc(value_delta, derivative_delta, u: f32) -> f32 {
 	u2 := u * u
@@ -80,7 +81,7 @@ close_track_loop :: proc(nodes: []Track_Node) {
 			start_sin := f32(math.sin(f64(start_node.heading)))
 			local_lateral := draft_x * start_cos - draft_z * start_sin
 			local_forward := draft_x * start_sin + draft_z * start_cos
-			preserve_scale := f32(1.80)
+			preserve_scale := SPIRAL_CLOSURE_SCALE
 			local_lateral *= preserve_scale
 			local_forward *= preserve_scale
 			radial_x := -f32(math.cos(f64(theta)))
