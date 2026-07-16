@@ -80,18 +80,7 @@ close_track_loop :: proc(nodes: []Track_Node) {
 			start_sin := f32(math.sin(f64(start_node.heading)))
 			local_lateral := draft_x * start_cos - draft_z * start_sin
 			local_forward := draft_x * start_sin + draft_z * start_cos
-			max_draft: f32
-			for draft_i in section_start ..= section_end {
-				draft_phase := f32(draft_i - section_start) / f32(section_span)
-				draft_baseline_x :=
-					start_node.curve_x + (end_node.curve_x - start_node.curve_x) * draft_phase
-				draft_baseline_z :=
-					start_node.curve_z + (end_node.curve_z - start_node.curve_z) * draft_phase
-				dx := nodes[draft_i].curve_x - draft_baseline_x
-				dz := nodes[draft_i].curve_z - draft_baseline_z
-				max_draft = max(max_draft, f32(math.sqrt(f64(dx * dx + dz * dz))))
-			}
-			preserve_scale := loop_radius * 1.20 / max(0.001, max_draft)
+			preserve_scale := f32(1.80)
 			local_lateral *= preserve_scale
 			local_forward *= preserve_scale
 			radial_x := -f32(math.cos(f64(theta)))
@@ -273,6 +262,32 @@ road_center_sample :: proc(
 	}
 }
 
+road_near_edge_depth :: proc(
+	nodes: []Track_Node,
+	node_position, base_x, base_y, base_z, base_heading: f32,
+) -> f32 {
+	width := width_sample(nodes, node_position)
+	left := road_point_sample(
+		nodes,
+		node_position,
+		-width,
+		base_x,
+		base_y,
+		base_z,
+		base_heading,
+	)
+	right := road_point_sample(
+		nodes,
+		node_position,
+		width,
+		base_x,
+		base_y,
+		base_z,
+		base_heading,
+	)
+	return min(left.z, right.z)
+}
+
 road_near_sample_position :: proc(
 	nodes: []Track_Node,
 	playhead, base_x, base_y, base_z, base_heading: f32,
@@ -281,7 +296,7 @@ road_near_sample_position :: proc(
 	front_position := playhead
 	for step in 1 ..= 8 {
 		back_position := playhead - f32(step)
-		back_center := road_center_sample(
+		back_edge_z := road_near_edge_depth(
 			nodes,
 			back_position,
 			base_x,
@@ -289,10 +304,10 @@ road_near_sample_position :: proc(
 			base_z,
 			base_heading,
 		)
-		if back_center.z <= target_z {
+		if back_edge_z <= target_z {
 			for _ in 0 ..< 12 {
 				middle_position := (back_position + front_position) * 0.5
-				middle_center := road_center_sample(
+				middle_edge_z := road_near_edge_depth(
 					nodes,
 					middle_position,
 					base_x,
@@ -300,7 +315,7 @@ road_near_sample_position :: proc(
 					base_z,
 					base_heading,
 				)
-				if middle_center.z <= target_z do back_position = middle_position
+				if middle_edge_z <= target_z do back_position = middle_position
 				else do front_position = middle_position
 			}
 			return front_position
