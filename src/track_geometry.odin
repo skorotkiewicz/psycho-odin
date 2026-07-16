@@ -268,24 +268,8 @@ road_near_edge_depth :: proc(
 	node_position, base_x, base_y, base_z, base_heading: f32,
 ) -> f32 {
 	width := width_sample(nodes, node_position)
-	left := road_point_sample(
-		nodes,
-		node_position,
-		-width,
-		base_x,
-		base_y,
-		base_z,
-		base_heading,
-	)
-	right := road_point_sample(
-		nodes,
-		node_position,
-		width,
-		base_x,
-		base_y,
-		base_z,
-		base_heading,
-	)
+	left := road_point_sample(nodes, node_position, -width, base_x, base_y, base_z, base_heading)
+	right := road_point_sample(nodes, node_position, width, base_x, base_y, base_z, base_heading)
 	return min(left.z, right.z)
 }
 

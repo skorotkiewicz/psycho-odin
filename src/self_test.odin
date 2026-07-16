@@ -112,10 +112,7 @@ test_track_and_geometry :: proc() {
 	assert(track_is_closed(spiral_nodes))
 	spiral_cached_turn, spiral_max_node_turn: f32
 	for i in 0 ..< TRACK_SECTION_LENGTH - 1 {
-		turn := wrapped_angle_delta(
-			spiral_nodes[i + 1].heading,
-			spiral_nodes[i].heading,
-		)
+		turn := wrapped_angle_delta(spiral_nodes[i + 1].heading, spiral_nodes[i].heading)
 		spiral_cached_turn += turn
 		spiral_max_node_turn = max(spiral_max_node_turn, abs(turn))
 	}
