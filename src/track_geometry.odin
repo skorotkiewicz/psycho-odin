@@ -70,8 +70,10 @@ close_track_loop :: proc(nodes: []Track_Node) {
 			section_phase := f32(i - section_start) / f32(section_span)
 			start_node := nodes[section_start]
 			end_node := nodes[section_end]
-			baseline_x := start_node.curve_x + (end_node.curve_x - start_node.curve_x) * section_phase
-			baseline_z := start_node.curve_z + (end_node.curve_z - start_node.curve_z) * section_phase
+			baseline_x :=
+				start_node.curve_x + (end_node.curve_x - start_node.curve_x) * section_phase
+			baseline_z :=
+				start_node.curve_z + (end_node.curve_z - start_node.curve_z) * section_phase
 			draft_x := nodes[i].curve_x - baseline_x
 			draft_z := nodes[i].curve_z - baseline_z
 			start_cos := f32(math.cos(f64(start_node.heading)))
