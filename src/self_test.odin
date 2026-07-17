@@ -117,7 +117,10 @@ test_track_and_geometry :: proc() {
 			assert(abs(spiral_nodes[section_start].width - 4.55) < 0.001)
 			section_rise := spiral_nodes[section_end].curve_y - spiral_nodes[section_start].curve_y
 			spiral_min_rise = min(spiral_min_rise, section_rise)
-			assert(section_rise > 0, "cached spirals must ascend between recovery movements")
+			assert(
+				section_rise >= SPIRAL_MIN_CACHED_RISE - 0.01,
+				"cached spirals must keep their minimum rise between recovery movements",
+			)
 		} else {
 			assert(spiral_nodes[section_start].section == SLALOM)
 		}
@@ -159,6 +162,34 @@ test_track_and_geometry :: proc() {
 	assert(
 		terminal_spiral_nodes[TRACK_SECTION_LENGTH].section == SLALOM,
 		"a terminal spiral must become a recovery movement instead of descending into the seam",
+	)
+	recovery_nodes := make([]Track_Node, TRACK_SECTION_LENGTH * 3)
+	defer delete(recovery_nodes)
+	for i in 0 ..< len(recovery_nodes) {
+		recovery_nodes[i].bass = 0.1
+		recovery_nodes[i].mid = 0.1
+		recovery_nodes[i].high = 0.05
+		recovery_nodes[i].pace = 0.2
+		if i >= TRACK_SECTION_LENGTH && i < TRACK_SECTION_LENGTH * 2 {
+			recovery_nodes[i].mid = 0.6
+			recovery_nodes[i].pace = 0.7
+		}
+	}
+	compose_track(recovery_nodes, 24680)
+	recovery_spiral_start := TRACK_SECTION_LENGTH
+	recovery_spiral_end := recovery_spiral_start + TRACK_SECTION_LENGTH - 1
+	assert(recovery_nodes[0].section == CLIMB)
+	assert(recovery_nodes[recovery_spiral_start].section == SPIRAL)
+	assert(
+		recovery_nodes[TRACK_SECTION_LENGTH * 2].section == SLALOM,
+		"every spiral must override its following movement with a recovery slalom",
+	)
+	recovery_spiral_rise :=
+		recovery_nodes[recovery_spiral_end].curve_y - recovery_nodes[recovery_spiral_start].curve_y
+	fmt.printfln("self-test: recovery fixture spiral rise %.2f", recovery_spiral_rise)
+	assert(
+		recovery_spiral_rise >= SPIRAL_MIN_CACHED_RISE - 0.01,
+		"a recovery slalom must preserve the preceding spiral's cached ascent",
 	)
 
 	rate := 8000
@@ -242,7 +273,10 @@ test_track_and_geometry :: proc() {
 	assert(nodes[fixture_spiral_start].section == SPIRAL)
 	fixture_spiral_rise := nodes[fixture_spiral_end].curve_y - nodes[fixture_spiral_start].curve_y
 	fmt.printfln("self-test: cached spiral rise %.2f", fixture_spiral_rise)
-	assert(fixture_spiral_rise > 0, "cached mixed-track spirals must retain their draft ascent")
+	assert(
+		fixture_spiral_rise >= SPIRAL_MIN_CACHED_RISE - 0.01,
+		"cached mixed-track spirals must retain their minimum ascent",
+	)
 	min_x, max_x := nodes[0].curve_x, nodes[0].curve_x
 	min_y, max_y := nodes[0].curve_y, nodes[0].curve_y
 	min_turn, max_turn, min_pitch, max_pitch: f32

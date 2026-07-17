@@ -8,7 +8,7 @@ CHASE_CAMERA_MIN_Y :: f32(2.25)
 ROAD_CAMERA_CLEARANCE :: f32(1.5)
 SPIRAL_CLOSURE_SCALE :: f32(2.2)
 SPIRAL_SMOOTHING_PASSES :: 2
-SPIRAL_VERTICAL_CLOSURE_WEIGHT :: f32(0.50)
+SPIRAL_MIN_CACHED_RISE :: f32(12)
 
 closure_correction :: proc(value_delta, derivative_delta, u: f32) -> f32 {
 	u2 := u * u
@@ -34,47 +34,6 @@ close_track_loop :: proc(nodes: []Track_Node) {
 	delta_x := nodes[last_i].curve_x - nodes[0].curve_x
 	delta_y := nodes[last_i].curve_y - nodes[0].curve_y
 
-	// Closing the song's accumulated elevation normally spreads its correction
-	// across the whole lap. Advance that correction much more slowly inside a
-	// spiral, then catch up through ordinary sections, so selected coils retain
-	// their gentle draft ascent. The endpoint Hermite terms restore unit slope
-	// and therefore preserve the loop seam's vertical tangent.
-	height_closure_u := make([]f32, count)
-	defer delete(height_closure_u)
-	weighted_height_length: f32
-	for i in 1 ..< count {
-		segment_length := max(0, nodes[i].distance - nodes[i - 1].distance)
-		weight: f32 = 1
-		if nodes[i - 1].section == SPIRAL && nodes[i].section == SPIRAL {
-			weight = SPIRAL_VERTICAL_CLOSURE_WEIGHT
-		}
-		weighted_height_length += segment_length * weight
-		height_closure_u[i] = weighted_height_length
-	}
-	if weighted_height_length > 0.001 {
-		for &value in height_closure_u do value /= weighted_height_length
-	} else {
-		for i in 0 ..< count {
-			height_closure_u[i] = clamp((nodes[i].distance - first_distance) / raw_length, 0, 1)
-		}
-	}
-	start_height_slope := (height_closure_u[1] - height_closure_u[0]) / first_u
-	end_height_slope := (height_closure_u[last_i] - height_closure_u[last_i - 1]) / (1 - last_u)
-	for i in 0 ..< count {
-		u := clamp((nodes[i].distance - first_distance) / raw_length, 0, 1)
-		u2 := u * u
-		u3 := u2 * u
-		start_tangent := u3 - 2 * u2 + u
-		end_tangent := u3 - u2
-		height_closure_u[i] = clamp(
-			height_closure_u[i] +
-			(1 - start_height_slope) * start_tangent +
-			(1 - end_height_slope) * end_tangent,
-			0,
-			1,
-		)
-	}
-
 	wrapped := make([]rl.Vector3, count)
 	defer delete(wrapped)
 	tau := f32(2 * math.PI)
@@ -92,7 +51,7 @@ close_track_loop :: proc(nodes: []Track_Node) {
 		raw_height :=
 			nodes[i].curve_y -
 			nodes[0].curve_y -
-			closure_correction(delta_y, end_dydu - start_dydu, height_closure_u[i])
+			closure_correction(delta_y, end_dydu - start_dydu, u)
 		radial_music := clamp(raw_radial * 0.35, -loop_radius * 0.10, loop_radius * 0.10)
 		radius := loop_radius * (1 + 0.16 * f32(math.cos(f64(theta * 3)))) + radial_music
 		loop_height :=
@@ -154,6 +113,32 @@ close_track_loop :: proc(nodes: []Track_Node) {
 			}
 		}
 		copy(wrapped, smoothed)
+	}
+	// Loop closure can tilt a locally rising coil downhill. Guarantee a gentle
+	// cached ascent with a smooth lift, then return that lift to zero across the
+	// mandatory recovery slalom. Both ends have zero slope, so section joins and
+	// the global loop seam stay continuous.
+	for section_start := 0; section_start < last_i; section_start += TRACK_SECTION_LENGTH {
+		if nodes[section_start].section != SPIRAL do continue
+		section_end := min(last_i, section_start + TRACK_SECTION_LENGTH - 1)
+		recovery_start := section_end + 1
+		if recovery_start >= last_i do continue
+		recovery_end := min(last_i, recovery_start + TRACK_SECTION_LENGTH - 1)
+		cached_rise := wrapped[section_end].y - wrapped[section_start].y
+		lift := max(0, SPIRAL_MIN_CACHED_RISE - cached_rise)
+		if lift <= 0 do continue
+		section_span := f32(max(1, section_end - section_start))
+		for i in section_start ..= section_end {
+			phase := f32(i - section_start) / section_span
+			smooth_phase := phase * phase * (3 - 2 * phase)
+			wrapped[i].y += lift * smooth_phase
+		}
+		recovery_span := f32(max(1, recovery_end - recovery_start))
+		for i in recovery_start ..= recovery_end {
+			phase := f32(i - recovery_start) / recovery_span
+			smooth_phase := phase * phase * (3 - 2 * phase)
+			wrapped[i].y += lift * (1 - smooth_phase)
+		}
 	}
 	// Avoid a tiny floating-point crack from sin/cos(2*pi).
 	wrapped[last_i] = wrapped[0]

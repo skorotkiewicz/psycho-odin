@@ -15,6 +15,7 @@ SPIRAL_MIN_PACE :: f32(0.40)
 SPIRAL_BASS_DOMINANCE :: f32(1.25)
 SPIRAL_HIGH_DOMINANCE :: f32(2.0)
 SPIRAL_TURN_RADIANS_PER_NODE :: f32(2 * math.PI / TRACK_SECTION_LENGTH)
+SPIRAL_RECOVERY_MIN_NODES :: 16
 
 track_speed_multiplier :: proc(pace: f32, speed_limit: int = -1) -> f32 {
 	p := clamp(pace, 0, 1)
@@ -114,10 +115,14 @@ compose_track :: proc(nodes: []Track_Node, song_seed: u32, speed_limit: int = -1
 			n := f32(max(1, end - node_i))
 			bass, mid, high, pace = bass / n, mid / n, high / n, pace / n
 			section = track_section_for_music(bass, mid, high, pace)
-			if section == SPIRAL && (previous_section == SPIRAL || end == count) {
-				// Every rising coil needs a following recovery movement: long mid-heavy
-				// passages alternate with slaloms, and the terminal section cannot spiral
-				// down into the closed-loop seam.
+			if previous_section == SPIRAL {
+				// Every rising coil gets a recovery slalom so closed-loop elevation
+				// correction can happen outside the coil, regardless of the next section's
+				// otherwise-classified movement.
+				section = SLALOM
+			} else if section == SPIRAL && count - end < SPIRAL_RECOVERY_MIN_NODES {
+				// A coil without enough recovery road would have to descend abruptly into
+				// the closed-loop seam.
 				section = SLALOM
 			}
 			if node_i == 0 {
