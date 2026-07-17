@@ -114,9 +114,10 @@ compose_track :: proc(nodes: []Track_Node, song_seed: u32, speed_limit: int = -1
 			n := f32(max(1, end - node_i))
 			bass, mid, high, pace = bass / n, mid / n, high / n, pace / n
 			section = track_section_for_music(bass, mid, high, pace)
-			if section == SPIRAL && previous_section == SPIRAL {
-				// A recovery movement keeps long mid-heavy passages readable and gives
-				// closed-loop elevation correction somewhere outside the rising coil.
+			if section == SPIRAL && (previous_section == SPIRAL || end == count) {
+				// Every rising coil needs a following recovery movement: long mid-heavy
+				// passages alternate with slaloms, and the terminal section cannot spiral
+				// down into the closed-loop seam.
 				section = SLALOM
 			}
 			if node_i == 0 {

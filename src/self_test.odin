@@ -142,6 +142,24 @@ test_track_and_geometry :: proc() {
 	assert(spiral_max_node_turn < 0.55, "spiral closure must not introduce corner-like turns")
 	spiral_camera_y, spiral_camera_samples := fast_camera_min_y(spiral_nodes)
 	assert(spiral_camera_samples > 0 && spiral_camera_y >= CHASE_CAMERA_MIN_Y)
+	terminal_spiral_nodes := make([]Track_Node, TRACK_SECTION_LENGTH * 2)
+	defer delete(terminal_spiral_nodes)
+	for i in 0 ..< len(terminal_spiral_nodes) {
+		terminal_spiral_nodes[i].bass = 0.1
+		terminal_spiral_nodes[i].mid = 0.1
+		terminal_spiral_nodes[i].high = 0.05
+		terminal_spiral_nodes[i].pace = 0.2
+		if i >= TRACK_SECTION_LENGTH {
+			terminal_spiral_nodes[i].mid = 0.6
+			terminal_spiral_nodes[i].pace = 0.7
+		}
+	}
+	compose_track(terminal_spiral_nodes, 54321)
+	assert(terminal_spiral_nodes[0].section == CLIMB)
+	assert(
+		terminal_spiral_nodes[TRACK_SECTION_LENGTH].section == SLALOM,
+		"a terminal spiral must become a recovery movement instead of descending into the seam",
+	)
 
 	rate := 8000
 	samples := make([]f32, rate * 24)
