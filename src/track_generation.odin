@@ -85,7 +85,8 @@ spiral_heading_target :: proc(heading, direction: f32) -> f32 {
 }
 
 spiral_pitch_base :: proc(phase: f32) -> f32 {
-	return 0.075 + f32(math.sin(f64(clamp(phase, 0, 1) * 2 * math.PI))) * 0.025
+	p := clamp(phase, 0, 1)
+	return 0.055 + p * 0.060
 }
 
 compose_track :: proc(nodes: []Track_Node, song_seed: u32, speed_limit: int = -1) {

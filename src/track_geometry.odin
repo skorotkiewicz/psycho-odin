@@ -255,8 +255,7 @@ track_sample_indices :: proc(
 	position := node_position
 	if track_is_closed(nodes) {
 		span := f32(len(nodes) - 1)
-		for position > span do position -= span
-		for position < 0 do position += span
+		position = position - f32(math.floor(f64(position / span))) * span
 	} else {
 		position = clamp(position, 0, f32(len(nodes) - 1))
 	}
@@ -360,7 +359,7 @@ road_near_sample_position :: proc(
 
 heading_sample :: proc(nodes: []Track_Node, node_position: f32) -> f32 {
 	i, next_i, fraction := track_sample_indices(nodes, node_position)
-	return nodes[i].heading + (nodes[next_i].heading - nodes[i].heading) * fraction
+	return nodes[i].heading + wrapped_angle_delta(nodes[next_i].heading, nodes[i].heading) * fraction
 }
 
 pitch_sample :: proc(nodes: []Track_Node, node_position: f32) -> f32 {

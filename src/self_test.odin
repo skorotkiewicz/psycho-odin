@@ -98,6 +98,10 @@ test_track_and_geometry :: proc() {
 	assert(abs(spiral_heading - f32(2 * math.PI)) < 0.001)
 	assert(abs(reverse_spiral_heading + f32(2 * math.PI)) < 0.001)
 	assert(spiral_pitch_base(0) > 0 && spiral_pitch_base(0.75) > 0)
+	assert(
+		spiral_pitch_base(1) > spiral_pitch_base(0),
+		"spiral pitch must rise monotonically through the coil",
+	)
 
 	spiral_nodes := make([]Track_Node, TRACK_SECTION_LENGTH * 6)
 	defer delete(spiral_nodes)
