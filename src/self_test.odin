@@ -391,7 +391,7 @@ test_track_and_geometry :: proc() {
 		"the first visible road edge must stay safely ahead of the camera",
 	)
 	assert(
-		shallowest_cropped_z < -2.5,
+		shallowest_cropped_z < -3,
 		"the first visible road edge must extend behind the player and fill the foreground",
 	)
 	sample_boundary := f32(probe_i + 10)
