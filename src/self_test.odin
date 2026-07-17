@@ -78,6 +78,9 @@ test_track_and_geometry :: proc() {
 	assert(track_section_for_music(0.2, 0.25, 0.1, 0.5) == SLALOM)
 	assert(track_section_for_music(0.1, 0.2, 0.15, 0.5) == TUNNEL)
 	assert(track_section_for_music(0.1, 0.5, 0.1, 0.5) == SPIRAL)
+	assert(track_section_for_music(0.4, 0.5, 0.25, 0.5) == SPIRAL)
+	assert(track_section_for_music(0.41, 0.5, 0.1, 0.5) == SLALOM)
+	assert(track_section_for_music(0.1, 0.5, 0.251, 0.5) == TUNNEL)
 	assert(track_section_for_music(0.1, 0.5, 0.1, SPIRAL_MIN_PACE - 0.01) == SLALOM)
 	assert(
 		track_section_for_music(0.1, SPIRAL_MIN_MID - 0.01, 0.1, 0.5) == SLALOM,
@@ -208,6 +211,7 @@ test_track_and_geometry :: proc() {
 	min_x, max_x := nodes[0].curve_x, nodes[0].curve_x
 	min_y, max_y := nodes[0].curve_y, nodes[0].curve_y
 	min_turn, max_turn, min_pitch, max_pitch: f32
+	min_turn_i, max_turn_i: int
 	for node in nodes {
 		min_x, max_x = min(min_x, node.curve_x), max(max_x, node.curve_x)
 		min_y, max_y = min(min_y, node.curve_y), max(max_y, node.curve_y)
@@ -233,16 +237,24 @@ test_track_and_geometry :: proc() {
 		assert(abs(pitch - nodes[i].pitch) < 0.001, "cached pitch must match centerline tangent")
 		if i > 0 {
 			turn := nodes[i].heading - nodes[i - 1].heading
-			min_turn = min(min_turn, turn)
-			max_turn = max(max_turn, turn)
+			if turn < min_turn {
+				min_turn = turn
+				min_turn_i = i
+			}
+			if turn > max_turn {
+				max_turn = turn
+				max_turn_i = i
+			}
 		}
 		min_pitch = min(min_pitch, pitch)
 		max_pitch = max(max_pitch, pitch)
 	}
 	fmt.printfln(
-		"self-test: local turn %.1f° left / %.1f° right; pitch %.1f° up / %.1f° down",
+		"self-test: local turn %.1f° left @%d / %.1f° right @%d; pitch %.1f° up / %.1f° down",
 		f64(max_turn) * 180 / math.PI,
+		max_turn_i,
 		f64(min_turn) * 180 / math.PI,
+		min_turn_i,
 		f64(max_pitch) * 180 / math.PI,
 		f64(min_pitch) * 180 / math.PI,
 	)
@@ -250,6 +262,10 @@ test_track_and_geometry :: proc() {
 	assert(card(sections) == 4)
 	assert(max_x - min_x > 16 && max_y - min_y > 18 && features > 4)
 	assert(max_turn > 0.004 && min_turn < -0.004, "closed road must curve both ways")
+	assert(
+		max(abs(min_turn), abs(max_turn)) < 0.55,
+		"mixed-section closure must not introduce corner-like turns",
+	)
 	assert(max_pitch > 0.10 && min_pitch < -0.10, "road must make visible climbs and drops")
 	probe_i := len(nodes) / 2
 	probe := nodes[probe_i]

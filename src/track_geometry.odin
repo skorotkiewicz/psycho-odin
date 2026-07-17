@@ -6,7 +6,8 @@ import rl "vendor:raylib"
 CHASE_CAMERA_Z :: f32(-6.35)
 CHASE_CAMERA_MIN_Y :: f32(2.25)
 ROAD_CAMERA_CLEARANCE :: f32(1.5)
-SPIRAL_CLOSURE_SCALE :: f32(2.5)
+SPIRAL_CLOSURE_SCALE :: f32(2.2)
+SPIRAL_SMOOTHING_PASSES :: 2
 
 closure_correction :: proc(value_delta, derivative_delta, u: f32) -> f32 {
 	u2 := u * u
@@ -91,6 +92,26 @@ close_track_loop :: proc(nodes: []Track_Node) {
 			wrapped[i].x += local_lateral * radial_x + local_forward * tangent_x
 			wrapped[i].z += local_lateral * radial_z + local_forward * tangent_z
 		}
+	}
+	// The preserved loop rides on top of the broad closure curve. Smooth only
+	// interior spiral nodes so those two motions cannot form a one-node cusp.
+	smoothed := make([]rl.Vector3, count)
+	defer delete(smoothed)
+	for _ in 0 ..< SPIRAL_SMOOTHING_PASSES {
+		copy(smoothed, wrapped)
+		for i in 1 ..< last_i {
+			if nodes[i - 1].section != SPIRAL ||
+			   nodes[i].section != SPIRAL ||
+			   nodes[i + 1].section != SPIRAL {
+				continue
+			}
+			smoothed[i] = {
+				(wrapped[i - 1].x + wrapped[i].x * 2 + wrapped[i + 1].x) * 0.25,
+				(wrapped[i - 1].y + wrapped[i].y * 2 + wrapped[i + 1].y) * 0.25,
+				(wrapped[i - 1].z + wrapped[i].z * 2 + wrapped[i + 1].z) * 0.25,
+			}
+		}
+		copy(wrapped, smoothed)
 	}
 	// Avoid a tiny floating-point crack from sin/cos(2*pi).
 	wrapped[last_i] = wrapped[0]
