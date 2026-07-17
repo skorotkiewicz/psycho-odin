@@ -108,9 +108,19 @@ test_track_and_geometry :: proc() {
 		node.pace = 0.7
 	}
 	compose_track(spiral_nodes, 12345)
-	for node in spiral_nodes {
-		assert(node.section == SPIRAL)
-		assert(abs(node.width - 4.55) < 0.001)
+	spiral_min_rise: f32 = 1e9
+	for section_i in 0 ..< 6 {
+		section_start := section_i * TRACK_SECTION_LENGTH
+		section_end := section_start + TRACK_SECTION_LENGTH - 1
+		if section_i % 2 == 0 {
+			assert(spiral_nodes[section_start].section == SPIRAL)
+			assert(abs(spiral_nodes[section_start].width - 4.55) < 0.001)
+			section_rise := spiral_nodes[section_end].curve_y - spiral_nodes[section_start].curve_y
+			spiral_min_rise = min(spiral_min_rise, section_rise)
+			assert(section_rise > 0, "cached spirals must ascend between recovery movements")
+		} else {
+			assert(spiral_nodes[section_start].section == SLALOM)
+		}
 	}
 	assert(track_is_closed(spiral_nodes))
 	spiral_cached_turn, spiral_max_node_turn: f32
@@ -120,9 +130,10 @@ test_track_and_geometry :: proc() {
 		spiral_max_node_turn = max(spiral_max_node_turn, abs(turn))
 	}
 	fmt.printfln(
-		"self-test: spiral cached turn %.1f° max step %.1f°",
+		"self-test: spiral cached turn %.1f° max step %.1f° min rise %.1f",
 		f64(spiral_cached_turn) * 180 / math.PI,
 		f64(spiral_max_node_turn) * 180 / math.PI,
+		spiral_min_rise,
 	)
 	assert(
 		abs(spiral_cached_turn) > f32(1.5 * math.PI),
@@ -208,6 +219,12 @@ test_track_and_geometry :: proc() {
 		int(TUNNEL) in sections,
 		int(SPIRAL) in sections,
 	)
+	fixture_spiral_start := TRACK_SECTION_LENGTH * 2
+	fixture_spiral_end := fixture_spiral_start + TRACK_SECTION_LENGTH - 1
+	assert(nodes[fixture_spiral_start].section == SPIRAL)
+	fixture_spiral_rise := nodes[fixture_spiral_end].curve_y - nodes[fixture_spiral_start].curve_y
+	fmt.printfln("self-test: cached spiral rise %.2f", fixture_spiral_rise)
+	assert(fixture_spiral_rise > 0, "cached mixed-track spirals must retain their draft ascent")
 	min_x, max_x := nodes[0].curve_x, nodes[0].curve_x
 	min_y, max_y := nodes[0].curve_y, nodes[0].curve_y
 	min_turn, max_turn, min_pitch, max_pitch: f32
