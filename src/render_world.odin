@@ -86,6 +86,15 @@ rhythm_impulse_strength :: proc(accent, bass, visual_strength: f32) -> f32 {
 	return clamp(power, 0, 1)
 }
 
+rhythm_push_visual :: proc(push: Rhythm_Push, visual_strength: f32) -> Rhythm_Push {
+	strength := clamp(visual_strength, 0, 1)
+	return {
+		impact = push.impact * strength,
+		rebound = push.rebound * strength,
+		velocity = push.velocity * strength,
+	}
+}
+
 rhythm_push_step :: proc(
 	push: Rhythm_Push,
 	impulse, delta_time: f32,

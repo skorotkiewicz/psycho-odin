@@ -2,6 +2,7 @@ package main
 
 import "core:math"
 import "core:sync"
+import rl "vendor:raylib"
 
 AUDIO_FX_MAX_AMOUNT :: f32(0.5)
 AUDIO_FX_MIN_BEAT_HZ :: f32(4)
@@ -86,6 +87,24 @@ audio_fx_trigger_tingle :: proc() {
 
 audio_fx_request_reset :: proc() {
 	sync.atomic_add_explicit(&fx_reset_events, u32(1), .Release)
+}
+
+audio_fx_mixing_format :: proc() -> (sample_rate: f32, channel_count: int) {
+	// Stream processors receive device-format frames, not the source file format.
+	// Raylib exposes that format through a Sound converted at load time.
+	silence: [256]f32
+	probe := rl.LoadSoundFromWave(
+		rl.Wave {
+			frameCount = len(silence),
+			sampleRate = 48000,
+			sampleSize = 32,
+			channels = 1,
+			data = &silence[0],
+		},
+	)
+	defer rl.UnloadSound(probe)
+	if !rl.IsSoundValid(probe) do return
+	return f32(probe.stream.sampleRate), int(probe.stream.channels)
 }
 
 audio_fx_initialize :: proc(enabled: bool, amount, sample_rate: f32, channel_count: int) {

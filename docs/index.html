@@ -1631,6 +1631,7 @@
         canvas.style.height = height + "px";
         context.setTransform(dpr, 0, 0, dpr, 0, 0);
         makeStars();
+        window.cancelAnimationFrame(animationFrame);
         drawFrame(performance.now());
       }
 

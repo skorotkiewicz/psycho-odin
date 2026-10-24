@@ -8,8 +8,9 @@ import "core:os"
 import rl "vendor:raylib"
 
 MAP_MAGIC :: u64(0x50535943484f3031) // PSYCHO01
-MAP_VERSION :: u32(2)
-STEP :: f32(0.10)
+MAP_VERSION :: u32(3)
+ANALYSIS_SLICES_PER_SECOND :: 10
+STEP :: f32(1.0 / ANALYSIS_SLICES_PER_SECOND)
 
 Cache_Header :: struct {
 	magic:          u64,
@@ -43,6 +44,62 @@ save_map :: proc(path: string, nodes: []Track_Node) -> bool {
 	return os.write_entire_file(path, data) == nil
 }
 
+map_nodes_valid :: proc(nodes: []Track_Node) -> bool {
+	for node, i in nodes {
+		values := [?]f32 {
+			node.bass,
+			node.mid,
+			node.high,
+			node.energy,
+			node.onset,
+			node.tempo,
+			node.activity,
+			node.pace,
+			node.width,
+			node.curve_x,
+			node.curve_y,
+			node.curve_z,
+			node.heading,
+			node.pitch,
+			node.distance,
+			node.beat,
+		}
+		for value in values {
+			if math.is_nan(value) || math.is_inf(value) do return false
+		}
+		levels := [?]f32 {
+			node.bass,
+			node.mid,
+			node.high,
+			node.energy,
+			node.onset,
+			node.tempo,
+			node.activity,
+			node.pace,
+			node.beat,
+		}
+		for level in levels {
+			if level < 0 || level > 1 do return false
+		}
+		if node.section < CLIMB ||
+		   node.section >= TRACK_SECTION_KIND_COUNT ||
+		   node.kind < 0 ||
+		   node.kind > BOOST ||
+		   node.tone < 0 ||
+		   node.tone > 2 ||
+		   node.feature < 0 ||
+		   node.feature > RAMP ||
+		   node.lane < -1 ||
+		   node.lane > 1 ||
+		   node.width <= 0 ||
+		   node.distance < 0 {
+			return false
+		}
+		if i > 0 && node.distance <= nodes[i - 1].distance do return false
+	}
+	return len(nodes) > 0
+}
+
 load_map :: proc(path: string) -> (nodes: []Track_Node, ok: bool) {
 	data, err := os.read_entire_file(path, context.allocator)
 	if err != nil do return
@@ -57,6 +114,10 @@ load_map :: proc(path: string) -> (nodes: []Track_Node, ok: bool) {
 
 	nodes = make([]Track_Node, int(header.count))
 	copy(mem.slice_to_bytes(nodes), data[size_of(Cache_Header):])
+	if !map_nodes_valid(nodes) {
+		delete(nodes)
+		return nil, false
+	}
 	return nodes, true
 }
 
@@ -65,10 +126,15 @@ analyze_samples :: proc(
 	frame_count, sample_rate, channels: int,
 	speed_limit: int = -1,
 ) -> []Track_Node {
-	frames_per_node := max(1, int(f32(sample_rate) * STEP))
-	count := max(1, (frame_count + frames_per_node - 1) / frames_per_node)
+	if samples == nil || frame_count <= 0 || sample_rate <= 0 || channels <= 0 do return nil
+	count := int(
+		(i64(frame_count) * ANALYSIS_SLICES_PER_SECOND + i64(sample_rate) - 1) / i64(sample_rate),
+	)
 	nodes := make([]Track_Node, count)
-	low, body: f32
+	low := make([]f32, channels)
+	body := make([]f32, channels)
+	defer delete(low)
+	defer delete(body)
 	low_alpha := f32(1 - math.exp(-2 * math.PI * 180 / f64(sample_rate)))
 	body_alpha := f32(1 - math.exp(-2 * math.PI * 2400 / f64(sample_rate)))
 	mean_energy, max_energy: f32
@@ -77,22 +143,25 @@ analyze_samples :: proc(
 	// First pass: three broad perceptual bands. The later offline passes combine these with
 	// song-relative dynamics and rhythm, which is more useful to the road than raw loudness.
 	for node_i in 0 ..< count {
-		start := node_i * frames_per_node
-		finish := min(frame_count, start + frames_per_node)
+		start := int(i64(node_i) * i64(sample_rate) / ANALYSIS_SLICES_PER_SECOND)
+		finish := min(
+			frame_count,
+			int(i64(node_i + 1) * i64(sample_rate) / ANALYSIS_SLICES_PER_SECOND),
+		)
 		bass_sum, mid_sum, high_sum: f64
 		for frame in start ..< finish {
-			sample: f32
-			for channel in 0 ..< channels do sample += samples[frame * channels + channel]
-			sample /= f32(channels)
-			low += low_alpha * (sample - low)
-			body += body_alpha * (sample - body)
-			mid := body - low
-			high := sample - body
-			bass_sum += f64(low * low)
-			mid_sum += f64(mid * mid)
-			high_sum += f64(high * high)
+			for channel in 0 ..< channels {
+				sample := samples[frame * channels + channel]
+				low[channel] += low_alpha * (sample - low[channel])
+				body[channel] += body_alpha * (sample - body[channel])
+				mid := body[channel] - low[channel]
+				high := sample - body[channel]
+				bass_sum += f64(low[channel] * low[channel])
+				mid_sum += f64(mid * mid)
+				high_sum += f64(high * high)
+			}
 		}
-		n := f64(max(1, finish - start))
+		n := f64(max(1, finish - start)) * f64(channels)
 		bass := f32(math.sqrt(bass_sum / n))
 		mid := f32(math.sqrt(mid_sum / n))
 		high := f32(math.sqrt(high_sum / n))

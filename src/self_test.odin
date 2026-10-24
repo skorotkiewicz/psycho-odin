@@ -652,6 +652,19 @@ test_gameplay_and_rendering :: proc() {
 	push = rhythm_push_step(push, strong_impulse, 1.0 / 60.0, true)
 	assert(push.impact > 0.95, "a strong beat must produce an immediate camera punch")
 	assert(push.rebound > 0.04 && push.velocity > 3, "a beat must launch the spring")
+	visual_disabled_push := rhythm_push_visual(push, 0)
+	assert(visual_disabled_push == Rhythm_Push{}, "zero visual strength must hide rhythm motion")
+	assert(rhythm_push_visual(push, 1) == push)
+	gameplay_echo := ship_echo_rhythm_strength(Rhythm_Motion{push = push})
+	assert(
+		ship_echo_collects_node(
+			Track_Node{kind = PICKUP, lane = 1, width = 4.8, pace = 1},
+			0,
+			gameplay_echo,
+			1,
+		),
+		"visual scaling must not suppress gameplay echo collection",
+	)
 	coasting_push := rhythm_push_step(push, 0, 1.0 / 60.0, true)
 	assert(coasting_push.impact < push.impact, "the sharp impact must decay")
 	assert(coasting_push.rebound > push.rebound, "the physical push must outlive the flash")
@@ -691,6 +704,27 @@ test_gameplay_and_rendering :: proc() {
 	assert(!ride_controls_enabled(false, true), "steering must stop after the ride finishes")
 	assert(should_catch_up_final_nodes(9, 12))
 	assert(should_catch_up_final_nodes(11, 12))
+	completed_time := ride_playback_time(0, 1.0, 1.2, 12, true)
+	assert(completed_time == 1.2, "a reset playback clock must finish a near-complete ride")
+	assert(
+		ride_playback_time(0, completed_time, 1.2, 12, true) == completed_time,
+		"results must retain the final playhead on subsequent stopped frames",
+	)
+	assert(
+		ride_playback_time(0, 0.4, 1.2, 12, true) == 0.4,
+		"an early stream failure must preserve progress without clearing the remainder",
+	)
+	last_node, last_fraction := ride_sample_position(completed_time, 12)
+	assert(
+		last_node == 11 && last_fraction == 0,
+		"the final road sample must match the stationary base transform",
+	)
+	middle_node, middle_fraction := ride_sample_position(0.55, 12)
+	assert(middle_node == 5 && abs(middle_fraction - 0.5) < 0.0001)
+	assert(ride_timer_step(6, 10, false) == 6, "paused gameplay must freeze overdrive")
+	assert(ride_timer_step(6, 2, true) == 4, "overdrive must follow uncapped playback time")
+	assert(ride_timer_step(1, 2, true) == 0)
+	assert(ride_timer_step(1, -2, true) == 1)
 	assert(
 		!should_catch_up_final_nodes(4, 12),
 		"an early playback failure must not process the unplayed remainder",
@@ -998,6 +1032,39 @@ hide_cursor = true
 }
 
 test_analysis_dynamics :: proc() {
+	odd_rate := 11025
+	odd_samples := make([]f32, odd_rate * 4)
+	defer delete(odd_samples)
+	odd_nodes := analyze_samples(raw_data(odd_samples), len(odd_samples), odd_rate, 1)
+	defer delete(odd_nodes)
+	assert(
+		len(odd_nodes) == 40,
+		"analysis slices must follow timestamps at fractional frame rates",
+	)
+
+	stereo_rate := 8000
+	mono_samples := make([]f32, stereo_rate * 2)
+	stereo_samples := make([]f32, len(mono_samples) * 2)
+	defer delete(mono_samples)
+	defer delete(stereo_samples)
+	for frame in 0 ..< len(mono_samples) {
+		sample := f32(math.sin(2 * math.PI * 440 * f64(frame) / f64(stereo_rate))) * 0.5
+		mono_samples[frame] = sample
+		stereo_samples[frame * 2] = sample
+		stereo_samples[frame * 2 + 1] = -sample
+	}
+	mono_nodes := analyze_samples(raw_data(mono_samples), len(mono_samples), stereo_rate, 1)
+	stereo_nodes := analyze_samples(raw_data(stereo_samples), len(mono_samples), stereo_rate, 2)
+	defer delete(mono_nodes)
+	defer delete(stereo_nodes)
+	for i in 0 ..< len(mono_nodes) {
+		assert(
+			abs(stereo_nodes[i].mid - mono_nodes[i].mid) < 0.0001,
+			"opposite-phase stereo must retain its audible band energy",
+		)
+		assert(abs(stereo_nodes[i].pace - mono_nodes[i].pace) < 0.0001)
+	}
+
 	rate := 8000
 	// Multi-second musical dynamics must produce opposite grades and visibly different speeds.
 	rhythm_samples := make([]f32, rate * 24)
@@ -1131,11 +1198,11 @@ test_analysis_dynamics :: proc() {
 }
 
 test_map_cache :: proc() {
-	assert(MAP_VERSION == 2, "SPIRAL generation must invalidate four-movement caches")
+	assert(MAP_VERSION == 3, "channel-energy and timestamp fixes must invalidate older caches")
 	nodes := [3]Track_Node {
-		{curve_z = 1.25, heading = 0.1, pitch = -0.2, lane = -1},
-		{curve_z = 3.50, heading = 0.2, pitch = 0.3, lane = 0},
-		{curve_z = 7.75, heading = -0.4, pitch = 0.1, lane = 1},
+		{curve_z = 1.25, heading = 0.1, pitch = -0.2, lane = -1, width = 4, distance = 0},
+		{curve_z = 3.50, heading = 0.2, pitch = 0.3, lane = 0, width = 4, distance = 3},
+		{curve_z = 7.75, heading = -0.4, pitch = 0.1, lane = 1, width = 4, distance = 7},
 	}
 	path := ".psycho_cache/self-test.map"
 	assert(save_map(path, nodes[:]))
@@ -1161,6 +1228,27 @@ test_map_cache :: proc() {
 		delete(bad_nodes)
 		assert(!bad_ok, "map cache must reject corrupt headers")
 	}
+	invalid_nodes: [8]Track_Node
+	for &node in invalid_nodes do node = nodes[0]
+	invalid_nodes[0].section = TRACK_SECTION_KIND_COUNT
+	invalid_nodes[1].curve_x = transmute(f32)u32(0x7fc00000)
+	invalid_nodes[2].heading = transmute(f32)u32(0x7f800000)
+	invalid_nodes[3].width = 0
+	invalid_nodes[4].lane = 2
+	invalid_nodes[5].pace = 2
+	invalid_nodes[6].kind = BOOST + 1
+	invalid_nodes[7].distance = -1
+	for node in invalid_nodes {
+		fixture := [1]Track_Node{node}
+		assert(save_map(path, fixture[:]))
+		bad_nodes, bad_ok := load_map(path)
+		delete(bad_nodes)
+		assert(!bad_ok, "map cache must reject corrupt node contents")
+	}
+	assert(map_nodes_valid(nodes[:]))
+	nonmonotonic := nodes
+	nonmonotonic[1].distance = nonmonotonic[0].distance
+	assert(!map_nodes_valid(nonmonotonic[:]))
 	fmt.println("self-test: map cache ok")
 }
 

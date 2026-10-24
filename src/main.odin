@@ -30,22 +30,26 @@ print_usage :: proc(to_stderr: bool = false) {
 }
 
 main :: proc() {
+	os.exit(run_game())
+}
+
+run_game :: proc() -> int {
 	if len(os.args) == 2 && (os.args[1] == "--help" || os.args[1] == "-h") {
 		print_usage()
-		return
+		return 0
 	}
 	if len(os.args) == 2 && os.args[1] == "--version" {
 		fmt.printfln("psycho %s", strings.trim_space(string(PSYCHO_VERSION)))
-		return
+		return 0
 	}
 	if len(os.args) == 2 && os.args[1] == "--self-test" {
 		self_test()
-		return
+		return 0
 	}
 	analyze_only := len(os.args) == 3 && os.args[1] == "--analyze"
 	if len(os.args) != 2 && !analyze_only {
 		fmt.eprintln(PSYCHO_USAGE_LINE)
-		return
+		return 1
 	}
 
 	config := load_game_config("config.toml")
@@ -54,7 +58,7 @@ main :: proc() {
 	file_bytes, file_err := os.read_entire_file(audio_path, context.allocator)
 	if file_err != nil {
 		fmt.eprintfln("psycho: cannot read %q: %v", audio_path, file_err)
-		return
+		return 1
 	}
 	song_id := song_content_id(file_bytes)
 	map_path := cache_path(file_bytes, config.speed_limit)
@@ -72,7 +76,7 @@ main :: proc() {
 		nodes = analyze_file(path_c, config.speed_limit)
 		if len(nodes) == 0 {
 			fmt.eprintln("psycho: unsupported or invalid audio file")
-			return
+			return 1
 		}
 		movements: [TRACK_SECTION_KIND_COUNT]int
 		traffic, surprises: int
@@ -104,7 +108,7 @@ main :: proc() {
 	defer delete(nodes)
 	if analyze_only {
 		fmt.println("map: analysis complete")
-		return
+		return 0
 	}
 	personal_bests := load_personal_bests(song_id, audio_path)
 	map_bounds := calculate_course_map_bounds(nodes)
@@ -125,7 +129,7 @@ main :: proc() {
 	scene := rl.LoadRenderTexture(rl.GetScreenWidth(), rl.GetScreenHeight())
 	if !rl.IsRenderTextureValid(scene) {
 		fmt.eprintln("psycho: could not create render target")
-		return
+		return 1
 	}
 	defer {
 		rl.UnloadRenderTexture(scene)
@@ -140,12 +144,12 @@ main :: proc() {
 	defer rl.CloseAudioDevice()
 	if !rl.IsAudioDeviceReady() {
 		fmt.eprintln("psycho: audio device unavailable")
-		return
+		return 1
 	}
 	music := rl.LoadMusicStream(path_c)
 	if !rl.IsMusicValid(music) {
 		fmt.eprintln("psycho: could not stream audio")
-		return
+		return 1
 	}
 	defer rl.UnloadMusicStream(music)
 	music.looping = false
@@ -154,13 +158,8 @@ main :: proc() {
 	rl.SetMusicVolume(music, volume)
 	audio_fx_enabled := config.audio_fx
 	audio_fx_amount := config.audio_fx_strength
-	audio_fx_channels := int(music.channels)
-	audio_fx_initialize(
-		audio_fx_enabled,
-		audio_fx_amount,
-		f32(music.sampleRate),
-		audio_fx_channels,
-	)
+	audio_fx_sample_rate, audio_fx_channels := audio_fx_mixing_format()
+	audio_fx_initialize(audio_fx_enabled, audio_fx_amount, audio_fx_sample_rate, audio_fx_channels)
 	if audio_fx_channels >= 2 {
 		rl.AttachAudioStreamProcessor(music.stream, audio_fx)
 		defer rl.DetachAudioStreamProcessor(music.stream, audio_fx)
@@ -191,6 +190,7 @@ main :: proc() {
 	secret_sequence: Secret_Sequence_State
 	ghost_pilot := false
 	for !rl.WindowShouldClose() {
+		observed_music_time := max(previous_music_time, rl.GetMusicTimePlayed(music))
 		rl.UpdateMusicStream(music)
 		dt := min(rl.GetFrameTime(), 0.05)
 		if !finished && rl.IsKeyPressed(.SPACE) {
@@ -287,20 +287,24 @@ main :: proc() {
 			mouse_active = false
 		}
 
-		time_played := rl.GetMusicTimePlayed(music)
-		drift_start_time := previous_music_time
-		previous_music_time = time_played
-		node_time := time_played / STEP
-		current := clamp(int(node_time), 0, len(nodes) - 1)
-		fraction := clamp(node_time - f32(current), 0, 1)
 		music_playing := rl.IsMusicStreamPlaying(music)
 		if music_playing do playback_seen = true
-		finished = ride_finished(paused, playback_seen, music_playing)
+		finished = finished || ride_finished(paused, playback_seen, music_playing)
+		time_played := ride_playback_time(
+			rl.GetMusicTimePlayed(music),
+			observed_music_time,
+			music_duration,
+			len(nodes),
+			finished,
+		)
+		drift_start_time := previous_music_time
+		previous_music_time = time_played
+		current, fraction := ride_sample_position(time_played, len(nodes))
 		if finished && should_catch_up_final_nodes(current, len(nodes)) {
 			// Raylib can report stopped playback before exposing the final sample time.
 			// Process a small end gap once, without treating an early stream failure as a clear.
 			current = len(nodes) - 1
-			fraction = 1
+			fraction = 0
 		}
 		drift_rate = 0
 		if !paused && playback_seen {
@@ -320,12 +324,16 @@ main :: proc() {
 			}
 		}
 		rhythm_impulse: f32
+		overdrive_time := drift_start_time
 		if current > last_index {
 			echo_rhythm := Rhythm_Motion {
 				push = rhythm_push,
 			}
 			echo_beat_strength := ship_echo_rhythm_strength(echo_rhythm)
 			for i in last_index + 1 ..= current {
+				event_time := max(overdrive_time, min(time_played, f32(i) * STEP))
+				overdrive = ride_timer_step(overdrive, event_time - overdrive_time, !paused)
+				overdrive_time = event_time
 				node_section_index := section_index_for_node(i)
 				if !section_mastery.active || node_section_index != section_mastery.section_index {
 					section_outcome := finish_section_mastery(section_mastery)
@@ -340,11 +348,7 @@ main :: proc() {
 					section_mastery = begin_section_mastery(nodes, i)
 				}
 				node := nodes[i]
-				node_impulse := rhythm_impulse_strength(
-					max(node.onset, node.beat),
-					node.bass,
-					visual_amount,
-				)
+				node_impulse := rhythm_impulse_strength(max(node.onset, node.beat), node.bass, 1)
 				rhythm_impulse = max(rhythm_impulse, node_impulse)
 				echo_beat_strength = max(echo_beat_strength, rhythm_impulse)
 				aligned := lane_aligned(player_lane, node.lane)
@@ -413,7 +417,7 @@ main :: proc() {
 		)
 		pulse = max(0, pulse - dt * 2.8)
 		shake = max(0, shake - dt * 4.5)
-		overdrive = max(0, overdrive - dt)
+		overdrive = ride_timer_step(overdrive, time_played - overdrive_time, !paused)
 		section_bonus_flash = max(0, section_bonus_flash - dt)
 		audio_fx_set_beat_hz(4 + nodes[current].bass * 6)
 		if finished && section_mastery.active {
@@ -505,7 +509,7 @@ main :: proc() {
 				fraction,
 				visual_amount,
 			),
-			push = rhythm_push,
+			push = rhythm_push_visual(rhythm_push, visual_amount),
 		}
 		rl.BeginTextureMode(scene)
 		rl.ClearBackground(rl.BLACK)
@@ -786,4 +790,5 @@ main :: proc() {
 		}
 		rl.EndDrawing()
 	}
+	return 0
 }

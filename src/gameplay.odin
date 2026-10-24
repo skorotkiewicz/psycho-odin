@@ -105,6 +105,32 @@ ride_controls_enabled :: proc(paused, finished: bool) -> bool {
 	return !paused && !finished
 }
 
+ride_playback_time :: proc(
+	reported_time, previous_time, duration: f32,
+	node_count: int,
+	finished: bool,
+) -> f32 {
+	// Stopping a raylib stream resets its clock, including on normal end-of-song.
+	playhead := clamp(max(reported_time, previous_time), 0, max(0, duration))
+	current := clamp(int(playhead / STEP), 0, max(0, node_count - 1))
+	if finished && should_catch_up_final_nodes(current, node_count) do return duration
+	return playhead
+}
+
+ride_sample_position :: proc(time_played: f32, node_count: int) -> (current: int, fraction: f32) {
+	if node_count <= 0 do return
+	node_time := max(0, time_played) / STEP
+	current = clamp(int(node_time), 0, node_count - 1)
+	// The last cached point has no following segment in the ride's base transform.
+	if current < node_count - 1 do fraction = clamp(node_time - f32(current), 0, 1)
+	return
+}
+
+ride_timer_step :: proc(remaining, delta_time: f32, active: bool) -> f32 {
+	if !active do return remaining
+	return max(0, remaining - max(0, delta_time))
+}
+
 should_catch_up_final_nodes :: proc(current, node_count: int) -> bool {
 	if node_count <= 0 || current < 0 || current >= node_count do return false
 	remaining := node_count - 1 - current
